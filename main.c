@@ -3,7 +3,7 @@
 *
 *  By: Paul Clarke
 *  Originally written: April 10, 2024
-*  See COPYING for copyright notice
+*  See COPYING for copyright
 *
 ********************************************************************************************/
 
@@ -169,14 +169,14 @@ void draw_ui_and_respond_input(struct state *st) {
 	}
 
 	// color read out
-	char value[3];
+	char value[22];
 	sprintf(value, "r: %-3d g: %-3d b: %-3d", cur_color.r, cur_color.g, cur_color.b); 
 	DrawTextEx(st->text_font, value, (Vector2) {grad_square_x, val_slider_y + 70}, 30., 1.5, st->text_color);
 }
 
 int main(void)
 {
-    // Initialization
+	// Initialization
 	struct state *st = (struct state *) calloc(1, sizeof(struct state));
 	st->screenWidth = 620;
 	st->screenHeight = 680;
@@ -196,7 +196,7 @@ int main(void)
 	st->text_font = LoadFont_NotoSansMonoTtf();
 
 	SetTargetFPS(60); // idk
-    // Main game loop
+	// Main game loop
 	while (!WindowShouldClose())
 	{
 		st->screenWidth = GetScreenWidth();
