@@ -1,15 +1,17 @@
 /*******************************************************************************************
-*  RGB color picker 
+*  cpick: RGB color picker
 *
-*  Copyright (c) 2024 Paul Clarke
+*  By: Paul Clarke
+*  Originally written: April 10, 2024
+*  See COPYING for copyright notice
 *
 ********************************************************************************************/
 
-#include <stdio.h>
+#include <stdio.h> // sprintf
 #include <stdlib.h> // malloc
 #include <sys/param.h> // MIN, MAX
-#include "raylib.h"
-#include "noto_sans_mono_ttf.h"
+#include "raylib.h" // everything CamelCase except...
+#include "noto_sans_mono_ttf.h" // LoadFont_NotoSansMonoTtf
 
 struct state {
 	int screenWidth;
@@ -19,7 +21,7 @@ struct state {
 	// these two represent the same thing...
 	int val_slider_offset; // offset in pixels
 	int val_slider_value; // 0-255
-	// last click in the square:
+	// last click in the square, in pixels:
 	int pointer_square_x;
 	int pointer_square_y;
 	Color text_color;
@@ -100,7 +102,7 @@ void draw_axes(int x, int y, int w, int h, struct state *st)
 	DrawRectangle(x+w-y_tick_len, y+h+512-tick_width, y_tick_len, tick_width, tick_color);	
 }
 
-void drawUIandRespondInput(struct state *st) {
+void draw_ui_and_respond_input(struct state *st) {
 	ClearBackground( current_color(st) );
 	Color cur_color = current_color(st);
 	if (cur_color.r*cur_color.r + cur_color.g*cur_color.g + cur_color.b*cur_color.b > 110000) {
@@ -176,8 +178,8 @@ int main(void)
 {
     // Initialization
 	struct state *st = (struct state *) calloc(1, sizeof(struct state));
-    st->screenWidth = 620;
-    st->screenHeight = 680;
+	st->screenWidth = 620;
+	st->screenHeight = 680;
 	st->which_fixed = 0;
 	st->val_slider_offset = 0;
 	st->val_slider_value = 0;
@@ -187,26 +189,26 @@ int main(void)
 
 	SetConfigFlags(FLAG_WINDOW_RESIZABLE);
 	SetTraceLogLevel(LOG_WARNING);
-    InitWindow(st->screenWidth, st->screenHeight, "CPick");
+	InitWindow(st->screenWidth, st->screenHeight, "CPick");
 
 	// to load a font from a ttf file:
 	// st->text_font = LoadFontEx("NotoSansMono.ttf", 120, NULL, 0);
 	st->text_font = LoadFont_NotoSansMonoTtf();
 
-    SetTargetFPS(60); // idk
+	SetTargetFPS(60); // idk
     // Main game loop
-    while (!WindowShouldClose())
-    {
+	while (!WindowShouldClose())
+	{
 		st->screenWidth = GetScreenWidth();
 		st->screenHeight = GetScreenHeight();
-        // Draw
+		// Draw
 		BeginDrawing();
-			drawUIandRespondInput(st);
+		draw_ui_and_respond_input(st);
 		EndDrawing();
     }
 
 	// ExportFontAsCode(st->text_font, "noto_sans_mono_ttf.h");
-    // De-Initialization
-    CloseWindow();        // Close window and OpenGL context
-    return 0;
+	// De-Initialization
+	CloseWindow();        // Close window and OpenGL context
+	return 0;
 }
