@@ -1,7 +1,7 @@
 /*******************************************************************************************
 *  RGB color picker 
 *
-*  Copyright (c) 2024  Paul Clarke
+*  Copyright (c) 2024 Paul Clarke
 *
 ********************************************************************************************/
 
@@ -22,6 +22,7 @@ struct state {
 	int pointer_square_x;
 	int pointer_square_y;
 	Color text_color;
+	Font text_font;
 };
 
 char *color_strings[3] = { "R", "G", "B" };
@@ -81,8 +82,10 @@ void draw_axes(int x, int y, int w, int h, struct state *st)
 	int label_size = 22;
 	Color label_color = st->text_color;
 
-	DrawText(color_strings[(st->which_fixed+1)%3], x+w + 512/2 - label_size, y, label_size, label_color);
-	DrawText(color_strings[(st->which_fixed+2)%3], x, y+h + 512/2 - label_size, label_size, label_color);
+	DrawTextEx(st->text_font, color_strings[(st->which_fixed+1)%3], 
+			   (Vector2) {x+w + 512/2 - label_size, y}, label_size, 2., label_color);
+	DrawTextEx(st->text_font, color_strings[(st->which_fixed+2)%3], 
+			   (Vector2) {x, y+h + 512/2 - label_size}, label_size, 2., label_color);
 	// x axis
 	for (int ix = x+w; ix < (x+w+512); ix += tick_sep) {
 		DrawRectangle(ix, y+h-x_tick_len, tick_width, x_tick_len, tick_color);	
@@ -129,7 +132,8 @@ void drawUIandRespondInput(struct state *st) {
 	int ind_button_y = grad_square_y_end + 10;
 	int ind_button_h = 60;
 	DrawRectangleLines(ind_button_x, ind_button_y, ind_button_h, ind_button_h, st->text_color);
-	DrawText(color_strings[st->which_fixed], ind_button_x+18, ind_button_y+10, 40, st->text_color);
+	DrawTextEx(st->text_font, color_strings[st->which_fixed], (Vector2) {ind_button_x+18, ind_button_y+10}, 40., 2, st->text_color);
+	// DrawTextEx(st->text_font, value, (Vector2) {grad_square_x, val_slider_y + 70}, 30., 1.5, st->text_color);
 	if (IsMouseButtonPressed(0)) {
 		Vector2 pos = GetMousePosition();
 		if (CheckCollisionPointRec(pos, (Rectangle) { ind_button_x, ind_button_y, ind_button_h, ind_button_h})) {
@@ -164,7 +168,7 @@ void drawUIandRespondInput(struct state *st) {
 	// color read out
 	char value[3];
 	sprintf(value, "r: %-3d g: %-3d b: %-3d", cur_color.r, cur_color.g, cur_color.b); 
-	DrawText(value, grad_square_x, val_slider_y + 70, 20, st->text_color);
+	DrawTextEx(st->text_font, value, (Vector2) {grad_square_x, val_slider_y + 70}, 30., 1.5, st->text_color);
 }
 
 int main(void)
@@ -181,8 +185,10 @@ int main(void)
 	st->text_color = WHITE;
 
 	SetConfigFlags(FLAG_WINDOW_RESIZABLE);
-	SetTraceLogLevel(LOG_WARNING);
+	SetTraceLogLevel(LOG_INFO);
     InitWindow(st->screenWidth, st->screenHeight, "cpick");
+
+	st->text_font = LoadFontEx("NotoSansMono.ttf", 120, NULL, 0);
 
     SetTargetFPS(60); // idk
     // Main game loop
