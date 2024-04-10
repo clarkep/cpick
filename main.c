@@ -9,6 +9,7 @@
 #include <stdlib.h> // malloc
 #include <sys/param.h> // MIN, MAX
 #include "raylib.h"
+#include "noto_sans_mono_ttf.h"
 
 struct state {
 	int screenWidth;
@@ -186,9 +187,11 @@ int main(void)
 
 	SetConfigFlags(FLAG_WINDOW_RESIZABLE);
 	SetTraceLogLevel(LOG_WARNING);
-    InitWindow(st->screenWidth, st->screenHeight, "cpick");
+    InitWindow(st->screenWidth, st->screenHeight, "CPick");
 
-	st->text_font = LoadFontEx("NotoSansMono.ttf", 120, NULL, 0);
+	// to load a font from a ttf file:
+	// st->text_font = LoadFontEx("NotoSansMono.ttf", 120, NULL, 0);
+	st->text_font = LoadFont_NotoSansMonoTtf();
 
     SetTargetFPS(60); // idk
     // Main game loop
@@ -202,6 +205,7 @@ int main(void)
 		EndDrawing();
     }
 
+	// ExportFontAsCode(st->text_font, "noto_sans_mono_ttf.h");
     // De-Initialization
     CloseWindow();        // Close window and OpenGL context
     return 0;
