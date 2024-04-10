@@ -14,8 +14,11 @@ and click anywhere on the central square to select a color.
 
 Building
 --------
-The only dependency is [raylib](https://www.raylib.com/).
-If you are on Linux, run:
+For now, this program is only distributed as source code. To use it, clone this
+repository and follow the build instructions.
+
+The only dependency is [raylib](https://www.raylib.com/). If you are on Linux,
+run:
 
      $ make
 
