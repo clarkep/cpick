@@ -169,8 +169,8 @@ void draw_ui_and_respond_input(struct state *st) {
 	}
 
 	// color read out
-	char value[22];
-	sprintf(value, "r: %-3d g: %-3d b: %-3d", cur_color.r, cur_color.g, cur_color.b); 
+	char value[30];
+	sprintf(value, "r:%-3d g:%-3d b:%-3d hex:#%02x%02x%02x", cur_color.r, cur_color.g, cur_color.b, cur_color.r, cur_color.g, cur_color.b);
 	DrawTextEx(st->text_font, value, (Vector2) {grad_square_x, val_slider_y + 70}, 30., 1.5, st->text_color);
 }
 
