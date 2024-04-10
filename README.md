@@ -1,6 +1,6 @@
 # CPick: a color picker
 
-CPick is a simple yet snazzy color picker written in C.
+CPick is a simple yet snazzy color RGB picker.
 
 ![screenshot](cpick.png)
 
