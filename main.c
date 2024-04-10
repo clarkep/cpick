@@ -185,7 +185,7 @@ int main(void)
 	st->text_color = WHITE;
 
 	SetConfigFlags(FLAG_WINDOW_RESIZABLE);
-	SetTraceLogLevel(LOG_INFO);
+	SetTraceLogLevel(LOG_WARNING);
     InitWindow(st->screenWidth, st->screenHeight, "cpick");
 
 	st->text_font = LoadFontEx("NotoSansMono.ttf", 120, NULL, 0);
