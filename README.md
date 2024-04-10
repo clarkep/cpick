@@ -7,9 +7,9 @@ CPick is a simple yet snazzy color picker written in C.
 Usage
 -----
 The central square shows a 2d slice of the RGB color space, while the slider
-adjusts the value of the third color. 
+adjusts the value of the third dimension. 
 
-Click on the square indicator button to change which color the slider controls,
+Click on the bottom left square to change which dimension the slider controls,
 and click anywhere on the central square to select a color.
 
 Building
