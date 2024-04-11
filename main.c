@@ -102,7 +102,8 @@ void draw_axes(int x, int y, int w, int h, struct state *st)
 	DrawRectangle(x+w-y_tick_len, y+h+512-tick_width, y_tick_len, tick_width, tick_color);	
 }
 
-void draw_ui_and_respond_input(struct state *st) {
+void draw_ui_and_respond_input(struct state *st)
+{
 	ClearBackground( current_color(st) );
 	Color cur_color = current_color(st);
 	if (cur_color.r*cur_color.r + cur_color.g*cur_color.g + cur_color.b*cur_color.b > 110000) {
@@ -122,6 +123,10 @@ void draw_ui_and_respond_input(struct state *st) {
 	int grad_square_x_end = grad_square_x + 512;
 	draw_axes(grad_square_x-y_axis_w, grad_square_y-x_axis_h, x_axis_h, y_axis_w, st);
 	draw_gradient_n(grad_square_x, grad_square_y, 2, st->which_fixed, st->val_slider_value);
+	int cur_loc_sq_sz = 4;
+	DrawRectangle(grad_square_x + st->pointer_square_x - cur_loc_sq_sz/2, 
+			grad_square_y + st->pointer_square_y - cur_loc_sq_sz/2, 
+			cur_loc_sq_sz, cur_loc_sq_sz, st->text_color);
 	if (IsMouseButtonDown(0)) {
 		Vector2 pos = GetMousePosition();
 		if (CheckCollisionPointRec(pos, (Rectangle) { grad_square_x, grad_square_y, 512, 512 })) {
