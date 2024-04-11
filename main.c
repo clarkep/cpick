@@ -10,6 +10,7 @@
 #include <stdio.h> // sprintf
 #include <stdlib.h> // malloc
 #include <sys/param.h> // MIN, MAX
+#include <math.h> // round
 #include "raylib.h" // everything CamelCase except...
 #include "noto_sans_mono_ttf.h" // LoadFont_NotoSansMonoTtf
 
@@ -19,11 +20,10 @@ struct state {
 	int which_fixed; // red(0), green(1) or blue(2)
 	bool val_slider_dragging;
 	// these two represent the same thing...
-	int val_slider_offset; // offset in pixels
-	int val_slider_value; // 0-255
+	int fixed_value; // 0-255
 	// last click in the square, in pixels:
-	int pointer_square_x;
-	int pointer_square_y;
+	int x_value;
+	int y_value;
 	Color text_color;
 	Font text_font;
 };
@@ -32,9 +32,9 @@ char *color_strings[3] = { "R", "G", "B" };
 
 Color current_color(struct state *st) 
 {
-	int v1 = st->val_slider_value;
-	int v2 = st->pointer_square_x / 2; 
-	int v3 = st->pointer_square_y / 2;
+	int v1 = st->fixed_value;
+	int v2 = st->x_value;
+	int v3 = st->y_value;
 	switch (st->which_fixed) {
 		case 0:
 			return (Color) { v1, v2, v3, 255 };
@@ -122,16 +122,20 @@ void draw_ui_and_respond_input(struct state *st)
 	int grad_square_y_end = grad_square_y + 512;
 	int grad_square_x_end = grad_square_x + 512;
 	draw_axes(grad_square_x-y_axis_w, grad_square_y-x_axis_h, x_axis_h, y_axis_w, st);
-	draw_gradient_n(grad_square_x, grad_square_y, 2, st->which_fixed, st->val_slider_value);
+	draw_gradient_n(grad_square_x, grad_square_y, 512/256, st->which_fixed, st->fixed_value);
 	int cur_loc_sq_sz = 4;
-	DrawRectangle(grad_square_x + st->pointer_square_x - cur_loc_sq_sz/2, 
-			grad_square_y + st->pointer_square_y - cur_loc_sq_sz/2, 
+	// depends on 512...
+	int square_x_offset = st->x_value * 2;
+	int square_y_offset = st->y_value * 2;
+	DrawRectangle(grad_square_x + square_x_offset - cur_loc_sq_sz/2,
+			grad_square_y + square_y_offset - cur_loc_sq_sz/2,
 			cur_loc_sq_sz, cur_loc_sq_sz, st->text_color);
 	if (IsMouseButtonDown(0)) {
 		Vector2 pos = GetMousePosition();
 		if (CheckCollisionPointRec(pos, (Rectangle) { grad_square_x, grad_square_y, 512, 512 })) {
-			st->pointer_square_x = pos.x - grad_square_x;
-			st->pointer_square_y = pos.y - grad_square_y;
+			// depends on 512...
+			st->x_value = (pos.x - grad_square_x) / 2;
+			st->y_value = (pos.y - grad_square_y) / 2;
 		}
 	}
 
@@ -146,6 +150,11 @@ void draw_ui_and_respond_input(struct state *st)
 		Vector2 pos = GetMousePosition();
 		if (CheckCollisionPointRec(pos, (Rectangle) { ind_button_x, ind_button_y, ind_button_h, ind_button_h})) {
 			st->which_fixed = (st->which_fixed + 1) % 3;
+			// Preserve color: x becomes the new fixed, y the new x, fixed the new y
+			int tmp = st->fixed_value;
+			st->fixed_value = st->x_value;
+			st->x_value = st->y_value;
+			st->y_value = tmp;
 		}
 	}
 
@@ -156,19 +165,20 @@ void draw_ui_and_respond_input(struct state *st)
 	int val_slider_h = 60;
 	DrawRectangle(val_slider_x, val_slider_y+26, val_slider_w, 6, st->text_color);
 	int wf = st->which_fixed;
-	Vector2 circle_center = { val_slider_x + st->val_slider_offset, val_slider_y+30 };
+	int val_slider_offset = roundf(val_slider_w * ( (float) st->fixed_value / 255 ));
+	Vector2 circle_center = { val_slider_x + val_slider_offset, val_slider_y+30 };
 	DrawCircleV(circle_center, 15,
 			   (Color) { wf == 0 ? 218 : 0, wf == 1 ? 216 : 0,  wf == 2 ? 216 : 0, 255 });
 	if (IsMouseButtonDown(0)) {
+		TraceLog(LOG_DEBUG, "Received click. dragging: %d", st->val_slider_dragging);
 		Vector2 pos = GetMousePosition();
 		if (CheckCollisionPointCircle(pos, circle_center, 30) || st->val_slider_dragging) {
 			st->val_slider_dragging = true;
-			st->val_slider_offset = MIN(val_slider_w, MAX(0, pos.x - val_slider_x));
+			val_slider_offset = MIN(val_slider_w, MAX(0, pos.x - val_slider_x));
 		} else if (CheckCollisionPointRec(pos, (Rectangle) { val_slider_x, val_slider_y, val_slider_w, val_slider_w } )) {
-			st->val_slider_offset = pos.x - val_slider_x;
+			val_slider_offset = pos.x - val_slider_x;
 		}
-		// keep in line with val_slider_offset
-		st->val_slider_value = (int) ((float) 255*st->val_slider_offset / val_slider_w);
+		st->fixed_value = roundf((float) 255*val_slider_offset / val_slider_w);
 	} else {
 		st->val_slider_dragging = false;
 	}
@@ -186,10 +196,9 @@ int main(void)
 	st->screenWidth = 620;
 	st->screenHeight = 680;
 	st->which_fixed = 0;
-	st->val_slider_offset = 0;
-	st->val_slider_value = 0;
-	st->pointer_square_x = 0;
-	st->pointer_square_y = 0;
+	st->fixed_value = 0;
+	st->x_value = 0;
+	st->y_value = 0;
 	st->text_color = WHITE;
 
 	SetConfigFlags(FLAG_WINDOW_RESIZABLE);

@@ -1,7 +1,7 @@
 PREFIX = /usr/local
 BINDIR = ${PREFIX}/bin
 
-LDFLAGS_CPICK = -lraylib
+LDFLAGS_CPICK = -lraylib -lm
 
 cpick: main.c
 	gcc -o cpick main.c ${LDFLAGS_CPICK}
