@@ -2,7 +2,7 @@
 *  cpick: RGB color picker
 *
 *  By: Paul Clarke
-*  Originally written: April 10, 2024
+*  Written: April 10, 2024
 *  See COPYING for copyright
 *
 ********************************************************************************************/
