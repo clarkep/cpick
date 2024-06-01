@@ -1,6 +1,6 @@
 # Cpick: a color picker
 
-Cpick is a simple yet snazzy RGB color picker.
+Cpick is a simple RGB color picker.
 
 ![screenshot](cpick.png)
 
