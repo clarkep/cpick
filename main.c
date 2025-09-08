@@ -1,18 +1,22 @@
-/*******************************************************************************************
-*  cpick: RGB color picker
-*
-*  By: Paul Clarke
-*  Originally written: April 10, 2024
-*  See COPYING for copyright
-*
-********************************************************************************************/
+/*
+cpick: a color picker
 
-#include <stdio.h> // sprintf
-#include <stdlib.h> // malloc
+By: Paul Clarke
+Created: 4/10/2024
+*/
+
+#include <stdio.h>
+#include <stdlib.h> // malloc, exit
+#include <string.h> // strcmp, strchr, memcpy
+#include <stdarg.h>
+#include <errno.h>
 #include <sys/param.h> // MIN, MAX
+#include <sys/time.h>
 #include <math.h> // round
 #include "raylib.h" // everything CamelCase except...
 #include "noto_sans_mono_ttf.h" // LoadFont_NotoSansMonoTtf
+
+#define WRITE_INTERVAL 1.0
 
 struct state {
 	int screenWidth;
@@ -26,11 +30,40 @@ struct state {
 	int y_value;
 	Color text_color;
 	Font text_font;
+	struct {
+		char *path;
+		unsigned long long offset;
+		int format;
+		Color last_write_color;
+		double last_write_time;
+	} outfile;
+	bool debug;
 };
 
 char *color_strings[3] = { "R", "G", "B" };
 
-Color current_color(struct state *st) 
+void myassert(bool p, char *fmt, ...) {
+	if (!p) {
+		va_list args;
+		va_start(args, fmt);
+		vfprintf(stderr, fmt, args);
+		va_end(args);
+		exit(1);
+	}
+}
+
+double get_os_time()
+{
+	struct timeval t;
+	gettimeofday(&t, NULL);
+	return (double) t.tv_sec + t.tv_usec / 1e6;
+}
+
+bool colors_equal(Color c1, Color c2) {
+	return c1.r == c2.r && c1.g == c2.g && c1.b == c2.b && c1.a == c2.a;
+}
+
+Color current_color(struct state *st)
 {
 	int v1 = st->fixed_value;
 	int v2 = st->x_value;
@@ -48,7 +81,23 @@ Color current_color(struct state *st)
 	}
 }
 
-void draw_gradient_n(int x, int y, int n, int which_fixed, int fixed_val)  
+void write_color_to_file(struct state *st, Color color)
+{
+	char color_text[10];
+	sprintf(color_text, "#%02x%02x02x", color.r, color.b, color.g);
+
+	FILE *f = fopen(st->outfile.path, "r+b");
+	myassert(f, "Failed to open file: %s.\n", st->outfile.path);
+	int res = fseek(f, st->outfile.offset, SEEK_SET);
+	myassert(!res, "Failed to write offset %llu in file %s.\n", st->outfile.offset, st->outfile.path);
+	int written = fwrite(color_text, 1, 7, f);
+	if (st->debug)
+		printf("Wrote %s to %s:%llu.\n", color_text, st->outfile.path,
+			st->outfile.offset);
+	fclose(f);
+}
+
+void draw_gradient_n(int x, int y, int n, int which_fixed, int fixed_val)
 {
 	int cur_x = x;
 	int cur_y = y;
@@ -64,7 +113,7 @@ void draw_gradient_n(int x, int y, int n, int which_fixed, int fixed_val)
 			}
 			for (int iy = 0; iy < n; iy++) {
 				for (int ix = 0; ix < n; ix++) {
-					DrawPixel(cur_x + ix, cur_y + iy, col);  
+					DrawPixel(cur_x + ix, cur_y + iy, col);
 				}
 			}
 			cur_x += n;
@@ -74,7 +123,7 @@ void draw_gradient_n(int x, int y, int n, int which_fixed, int fixed_val)
 	}
 }
 
-// TODO: parameter for 512 vs etc ? 
+// TODO: parameter for 512 vs etc ?
 void draw_axes(int x, int y, int w, int h, struct state *st)
 {
 	int tick_sep = 64;
@@ -85,21 +134,21 @@ void draw_axes(int x, int y, int w, int h, struct state *st)
 	int label_size = 22;
 	Color label_color = st->text_color;
 
-	DrawTextEx(st->text_font, color_strings[(st->which_fixed+1)%3], 
+	DrawTextEx(st->text_font, color_strings[(st->which_fixed+1)%3],
 			   (Vector2) {x+w + 512/2 - label_size, y}, label_size, 2., label_color);
-	DrawTextEx(st->text_font, color_strings[(st->which_fixed+2)%3], 
+	DrawTextEx(st->text_font, color_strings[(st->which_fixed+2)%3],
 			   (Vector2) {x, y+h + 512/2 - label_size}, label_size, 2., label_color);
 	// x axis
 	for (int ix = x+w; ix < (x+w+512); ix += tick_sep) {
-		DrawRectangle(ix, y+h-x_tick_len, tick_width, x_tick_len, tick_color);	
+		DrawRectangle(ix, y+h-x_tick_len, tick_width, x_tick_len, tick_color);
 	}
 	// perfectionist last tick
-	DrawRectangle(x+w+512-tick_width, y+h-x_tick_len, tick_width, x_tick_len, tick_color);	
+	DrawRectangle(x+w+512-tick_width, y+h-x_tick_len, tick_width, x_tick_len, tick_color);
 	// y axis
 	for (int iy = y+h; iy < (y+h+512); iy += tick_sep) {
-		DrawRectangle(x+w-y_tick_len, iy, y_tick_len, tick_width, tick_color);	
+		DrawRectangle(x+w-y_tick_len, iy, y_tick_len, tick_width, tick_color);
 	}
-	DrawRectangle(x+w-y_tick_len, y+h+512-tick_width, y_tick_len, tick_width, tick_color);	
+	DrawRectangle(x+w-y_tick_len, y+h+512-tick_width, y_tick_len, tick_width, tick_color);
 }
 
 void draw_ui_and_respond_input(struct state *st)
@@ -114,7 +163,7 @@ void draw_ui_and_respond_input(struct state *st)
 
 	// gradient square
 	int y_axis_w = 30;
-	int x_axis_h = 30; 
+	int x_axis_h = 30;
 	int grad_square_w = 512 + y_axis_w;
 	int grad_square_h = 512 + x_axis_h;
 	int grad_square_x = (st->screenWidth - 512)/2;
@@ -186,12 +235,25 @@ void draw_ui_and_respond_input(struct state *st)
 	// color read out
 	char value[30];
 	sprintf(value, "r:%-3d g:%-3d b:%-3d hex:#%02x%02x%02x", cur_color.r, cur_color.g, cur_color.b, cur_color.r, cur_color.g, cur_color.b);
+
 	DrawTextEx(st->text_font, value, (Vector2) {grad_square_x, val_slider_y + 70}, 30., 1.5, st->text_color);
+
+	double now = get_os_time();
+	if (st->outfile.path && now - st->outfile.last_write_time > WRITE_INTERVAL &&
+		!colors_equal(cur_color, st->outfile.last_write_color)) {
+		write_color_to_file(st, cur_color);
+		st->outfile.last_write_color = cur_color;
+		st->outfile.last_write_time = now;
+	}
 }
 
-int main(void)
+void assert_usage(bool p)
 {
-	// Initialization
+	myassert(p, "usage: cpick [-o file.txt:offset]\n");
+}
+
+int main(int argc, char *argv[])
+{
 	struct state *st = (struct state *) calloc(1, sizeof(struct state));
 	st->screenWidth = 620;
 	st->screenHeight = 680;
@@ -200,6 +262,30 @@ int main(void)
 	st->x_value = 0;
 	st->y_value = 0;
 	st->text_color = WHITE;
+	st->outfile.path = NULL;
+	st->outfile.offset = 0;
+	st->outfile.format = 0;
+	st->outfile.last_write_time = get_os_time();
+	st->outfile.last_write_color = (Color) { 0, 0, 0, 255 };
+	st->debug = false;
+
+	for (int i=1; i<argc; i++) {
+		char *arg = argv[i];
+		if (strcmp(arg, "-o")==0 || strcmp(arg, "--outfile")==0) {
+			assert_usage(i+1<argc);
+			char *param = argv[i+1];
+			char *sep = strchr(param, ':');
+			assert_usage(sep);
+			int path_len = sep - param;
+			st->outfile.path = malloc(path_len+1);
+			memcpy(st->outfile.path, param, path_len);
+			st->outfile.path[path_len] = '\0';
+			errno = 0;
+			st->outfile.offset = strtoull(sep+1, NULL, 10);
+			assert_usage(!errno);
+			i++;
+		}
+	}
 
 	SetConfigFlags(FLAG_WINDOW_RESIZABLE);
 	SetTraceLogLevel(LOG_WARNING);
