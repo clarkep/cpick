@@ -84,7 +84,7 @@ Color current_color(struct state *st)
 void write_color_to_file(struct state *st, Color color)
 {
 	char color_text[10];
-	sprintf(color_text, "#%02x%02x02x", color.r, color.b, color.g);
+	sprintf(color_text, "#%02x%02x%02x", color.r, color.g, color.b);
 
 	FILE *f = fopen(st->outfile.path, "r+b");
 	myassert(f, "Failed to open file: %s.\n", st->outfile.path);
@@ -267,7 +267,7 @@ int main(int argc, char *argv[])
 	st->outfile.format = 0;
 	st->outfile.last_write_time = get_os_time();
 	st->outfile.last_write_color = (Color) { 0, 0, 0, 255 };
-	st->debug = false;
+	st->debug = true;
 
 	for (int i=1; i<argc; i++) {
 		char *arg = argv[i];
@@ -285,6 +285,10 @@ int main(int argc, char *argv[])
 			assert_usage(!errno);
 			i++;
 		}
+	}
+
+	if (st->debug && st->outfile.path) {
+		printf("outfile: %s\n", st->outfile.path);
 	}
 
 	SetConfigFlags(FLAG_WINDOW_RESIZABLE);
