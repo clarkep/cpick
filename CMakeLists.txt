@@ -4,12 +4,31 @@ project(cpick)
 # Generate compile_commands.json
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+include(FetchContent)
+
+# Generate compile_commands.json
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+# Dependencies
+set(RAYLIB_VERSION 5.0)
+
+FetchContent_Declare(
+    raylib
+    DOWNLOAD_EXTRACT_TIMESTAMP OFF
+    URL https://github.com/raysan5/raylib/archive/refs/tags/${RAYLIB_VERSION}.tar.gz
+    FIND_PACKAGE_ARGS
+)
+
+FetchContent_MakeAvailable(raylib)
 
 # Our Project
-
 add_executable(${PROJECT_NAME} main.c)
 #set(raylib_VERBOSE 1)
+
 target_link_libraries(${PROJECT_NAME} raylib)
+if(UNIX AND NOT APPLE)  # or: if(NOT WIN32)
+  target_link_libraries(${PROJECT_NAME} m)
+endif()
 
 # Web Configurations
 if (EMSCRIPTEN)

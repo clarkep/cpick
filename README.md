@@ -14,17 +14,19 @@ the central square to select a color.
 
 Building
 --------
-For now, this program is only distributed as source code. To use it, clone this
-repository and follow the build instructions.
+This project depends on [raylib](https://github.com/raysan5/raylib).
 
-The only dependency is [raylib](https://www.raylib.com/). If you are on Linux,
-run:
+To build with cmake, run:
 
-     $ make
+     $ cmake -B build
 
-and optionally
+followed by
 
-     $ sudo make install
+     $ cmake --build build
 
-If you are on Windows or Mac, you will need to edit `Makefile` to adjust
-the install path.
+This will fetch and build raylib if it is not found. On windows, the executable is placed at `build\Debug\cpick.exe`
+by default, and on macOS or linux it is placed at `build\cpick`.
+
+Alternatively, if you are on macOS or Linux and raylib is already installed, you can use the simple build script:
+
+     $ ./build.sh
