@@ -10,11 +10,12 @@ Created: 4/10/2024
 #include <string.h> // strcmp, strchr, memcpy
 #include <stdarg.h>
 #include <errno.h>
-#include <sys/param.h> // MIN, MAX
-#include <sys/time.h>
 #include <math.h> // round
-#include "raylib.h" // everything CamelCase except...
+#include <raylib.h> // everything CamelCase except...
 #include "noto_sans_mono_ttf.h" // LoadFont_NotoSansMonoTtf
+
+#define MIN(x, y) ((x) <= (y) ? (x) : (y))
+#define MAX(x, y) ((x) > (y) ? (x) : (y))
 
 #define WRITE_INTERVAL 1.0
 
@@ -50,13 +51,6 @@ void myassert(bool p, char *fmt, ...) {
 		va_end(args);
 		exit(1);
 	}
-}
-
-double get_os_time()
-{
-	struct timeval t;
-	gettimeofday(&t, NULL);
-	return (double) t.tv_sec + t.tv_usec / 1e6;
 }
 
 bool colors_equal(Color c1, Color c2) {
@@ -238,7 +232,7 @@ void draw_ui_and_respond_input(struct state *st)
 
 	DrawTextEx(st->text_font, value, (Vector2) {grad_square_x, val_slider_y + 70}, 30., 1.5, st->text_color);
 
-	double now = get_os_time();
+	double now = GetTime();
 	if (st->outfile.path && now - st->outfile.last_write_time > WRITE_INTERVAL &&
 		!colors_equal(cur_color, st->outfile.last_write_color)) {
 		write_color_to_file(st, cur_color);
@@ -265,7 +259,7 @@ int main(int argc, char *argv[])
 	st->outfile.path = NULL;
 	st->outfile.offset = 0;
 	st->outfile.format = 0;
-	st->outfile.last_write_time = get_os_time();
+	st->outfile.last_write_time = GetTime();
 	st->outfile.last_write_color = (Color) { 0, 0, 0, 255 };
 	st->debug = true;
 
