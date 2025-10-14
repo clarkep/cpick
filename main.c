@@ -93,8 +93,8 @@ void write_color_to_file(struct state *st, Color color)
 
 void draw_gradient_n(int x, int y, int n, int which_fixed, int fixed_val)
 {
-	int cur_x = x;
-	int cur_y = y;
+	int cur_x = 0;
+	int cur_y = 0;
 	for (int v2 = 0; v2 < 256; v2++) {
 		for (int v1 = 0; v1 < 256; v1++) {
 			struct Color col;
@@ -107,12 +107,12 @@ void draw_gradient_n(int x, int y, int n, int which_fixed, int fixed_val)
 			}
 			for (int iy = 0; iy < n; iy++) {
 				for (int ix = 0; ix < n; ix++) {
-					DrawPixel(cur_x + ix, cur_y + iy, col);
+					DrawPixel(x + cur_x + ix, y + 511 - (cur_y + iy), col);
 				}
 			}
 			cur_x += n;
 		}
-		cur_x = x;
+		cur_x = 0;
 		cur_y += n;
 	}
 }
@@ -128,21 +128,23 @@ void draw_axes(int x, int y, int w, int h, struct state *st)
 	int label_size = 22;
 	Color label_color = st->text_color;
 
+	// x axis label
 	DrawTextEx(st->text_font, color_strings[(st->which_fixed+1)%3],
-			   (Vector2) {x+w + 512/2 - label_size, y}, label_size, 2., label_color);
+			   (Vector2) {x + 512/2 - label_size, y + 512 + h - label_size}, label_size, 2.,
+			   label_color);
 	DrawTextEx(st->text_font, color_strings[(st->which_fixed+2)%3],
-			   (Vector2) {x, y+h + 512/2 - label_size}, label_size, 2., label_color);
+			   (Vector2) {x - h, y + 512/2 - label_size}, label_size, 2., label_color);
 	// x axis
-	for (int ix = x+w; ix < (x+w+512); ix += tick_sep) {
-		DrawRectangle(ix, y+h-x_tick_len, tick_width, x_tick_len, tick_color);
+	for (int ix = x; ix < (x+512); ix += tick_sep) {
+		DrawRectangle(ix, y+512, tick_width, x_tick_len, tick_color);
 	}
 	// perfectionist last tick
-	DrawRectangle(x+w+512-tick_width, y+h-x_tick_len, tick_width, x_tick_len, tick_color);
+	DrawRectangle(x+512-tick_width, y+512, tick_width, x_tick_len, tick_color);
 	// y axis
-	for (int iy = y+h; iy < (y+h+512); iy += tick_sep) {
-		DrawRectangle(x+w-y_tick_len, iy, y_tick_len, tick_width, tick_color);
+	for (int iy = y; iy < (y+512); iy += tick_sep) {
+		DrawRectangle(x-y_tick_len, iy, y_tick_len, tick_width, tick_color);
 	}
-	DrawRectangle(x+w-y_tick_len, y+h+512-tick_width, y_tick_len, tick_width, tick_color);
+	DrawRectangle(x-y_tick_len, y+512-tick_width, y_tick_len, tick_width, tick_color);
 }
 
 void draw_ui_and_respond_input(struct state *st)
@@ -161,30 +163,30 @@ void draw_ui_and_respond_input(struct state *st)
 	int grad_square_w = 512 + y_axis_w;
 	int grad_square_h = 512 + x_axis_h;
 	int grad_square_x = (st->screenWidth - 512)/2;
-	int grad_square_y = 40;
+	int grad_square_y = 30;
 	int grad_square_y_end = grad_square_y + 512;
 	int grad_square_x_end = grad_square_x + 512;
-	draw_axes(grad_square_x-y_axis_w, grad_square_y-x_axis_h, x_axis_h, y_axis_w, st);
+	draw_axes(grad_square_x, grad_square_y, x_axis_h, y_axis_w, st);
 	draw_gradient_n(grad_square_x, grad_square_y, 512/256, st->which_fixed, st->fixed_value);
 	int cur_loc_sq_sz = 4;
 	// depends on 512...
 	int square_x_offset = st->x_value * 2;
 	int square_y_offset = st->y_value * 2;
 	DrawRectangle(grad_square_x + square_x_offset - cur_loc_sq_sz/2,
-			grad_square_y + square_y_offset - cur_loc_sq_sz/2,
+			grad_square_y + 511 - square_y_offset - cur_loc_sq_sz/2,
 			cur_loc_sq_sz, cur_loc_sq_sz, st->text_color);
 	if (IsMouseButtonDown(0)) {
 		Vector2 pos = GetMousePosition();
 		if (CheckCollisionPointRec(pos, (Rectangle) { grad_square_x, grad_square_y, 512, 512 })) {
 			// depends on 512...
 			st->x_value = (pos.x - grad_square_x) / 2;
-			st->y_value = (pos.y - grad_square_y) / 2;
+			st->y_value = (grad_square_y + 511 - pos.y) / 2;
 		}
 	}
 
 	// indicator button 
 	int ind_button_x = grad_square_x;
-	int ind_button_y = grad_square_y_end + 10;
+	int ind_button_y = grad_square_y_end + x_axis_h + 10;
 	int ind_button_h = 60;
 	DrawRectangleLines(ind_button_x, ind_button_y, ind_button_h, ind_button_h, st->text_color);
 	DrawTextEx(st->text_font, color_strings[st->which_fixed], (Vector2) {ind_button_x+18, ind_button_y+10}, 40., 2, st->text_color);
@@ -250,7 +252,7 @@ int main(int argc, char *argv[])
 {
 	struct state *st = (struct state *) calloc(1, sizeof(struct state));
 	st->screenWidth = 620;
-	st->screenHeight = 680;
+	st->screenHeight = 700;
 	st->which_fixed = 0;
 	st->fixed_value = 0;
 	st->x_value = 0;
