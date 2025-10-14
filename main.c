@@ -3,6 +3,7 @@ cpick: a color picker
 
 By: Paul Clarke
 Created: 4/10/2024
+License: GPL-3.0 (see LICENSE)
 */
 
 #include <stdio.h>
