@@ -1,2 +1,0 @@
-color: #007402 (offset 7)
-       ^ wow, look at that!
