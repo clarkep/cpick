@@ -6,6 +6,10 @@ Created: 4/10/2024
 License: GPL-3.0 (see LICENSE)
 */
 
+#ifdef _WIN32
+#define _CRT_SECURE_NO_WARNINGS
+#endif
+
 #include <stdio.h>
 #include <stdlib.h> // malloc, exit
 #include <string.h> // strcmp, strchr, memcpy
@@ -34,7 +38,7 @@ struct state {
 	Font text_font;
 	struct {
 		char *path;
-		unsigned long long offset;
+		unsigned long offset;
 		int format;
 		Color last_write_color;
 		double last_write_time;
@@ -84,10 +88,10 @@ void write_color_to_file(struct state *st, Color color)
 	FILE *f = fopen(st->outfile.path, "r+b");
 	myassert(f, "Failed to open file: %s.\n", st->outfile.path);
 	int res = fseek(f, st->outfile.offset, SEEK_SET);
-	myassert(!res, "Failed to write offset %llu in file %s.\n", st->outfile.offset, st->outfile.path);
-	int written = fwrite(color_text, 1, 7, f);
+	myassert(!res, "Failed to write offset %lu in file %s.\n", st->outfile.offset, st->outfile.path);
+	fwrite(color_text, 1, 7, f);
 	if (st->debug)
-		printf("Wrote %s to %s:%llu.\n", color_text, st->outfile.path,
+		printf("Wrote %s to %s:%lu.\n", color_text, st->outfile.path,
 			st->outfile.offset);
 	fclose(f);
 }
@@ -246,7 +250,7 @@ void draw_ui_and_respond_input(struct state *st)
 
 void assert_usage(bool p)
 {
-	myassert(p, "usage: cpick [-o file.txt:offset]\n");
+	myassert(p, "usage: cpick [file.txt:offset]\n");
 }
 
 int main(int argc, char *argv[])
@@ -268,17 +272,22 @@ int main(int argc, char *argv[])
 
 	for (int i=1; i<argc; i++) {
 		char *arg = argv[i];
-		if (strcmp(arg, "-o")==0 || strcmp(arg, "--outfile")==0) {
-			assert_usage(i+1<argc);
-			char *param = argv[i+1];
-			char *sep = strchr(param, ':');
+		if (argv[i][0] == '-') {
+			if (argv[i][1] == '-') {
+
+			} else {
+
+			}
+		} else {
+			assert_usage(!st->outfile.path);
+			char *sep = strchr(arg, ':');
 			assert_usage(sep);
-			int path_len = sep - param;
+			int path_len = sep - arg;
 			st->outfile.path = malloc(path_len+1);
-			memcpy(st->outfile.path, param, path_len);
+			memcpy(st->outfile.path, arg, path_len);
 			st->outfile.path[path_len] = '\0';
 			errno = 0;
-			st->outfile.offset = strtoull(sep+1, NULL, 10);
+			st->outfile.offset = strtoul(sep+1, NULL, 10);
 			assert_usage(!errno);
 			i++;
 		}
