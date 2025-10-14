@@ -24,8 +24,8 @@ followed by
 
      $ cmake --build build
 
-This will fetch and build raylib if it is not found. On windows, the executable is placed at `build\Debug\cpick.exe`
-by default, and on macOS or linux it is placed at `build\cpick`.
+This will fetch and build raylib if it is not found. On Windows, the executable is placed at `build\Debug\cpick.exe`
+by default, and on macOS or Linux it is placed at `build\cpick`.
 
 Alternatively, if you are on macOS or Linux and raylib is already installed, you can use the simple build script:
 
