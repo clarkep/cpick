@@ -2463,7 +2463,7 @@ static unsigned char fontData_NotoSansMonoTtf[COMPRESSED_DATA_SIZE_FONT_NOTOSANS
     0x7f, 0x00 };
 
 // Font characters rectangles data
-static const Rectangle fontRecs_NotoSansMonoTtf[95] = {
+static Rectangle fontRecs_NotoSansMonoTtf[95] = {
     { 4, 4, 52 , 120 },
     { 64, 4, 12 , 64 },
     { 84, 4, 25 , 23 },
@@ -2563,7 +2563,7 @@ static const Rectangle fontRecs_NotoSansMonoTtf[95] = {
 
 // Font glyphs info data
 // NOTE: No glyphs.image data provided
-static const GlyphInfo fontGlyphs_NotoSansMonoTtf[95] = {
+static GlyphInfo fontGlyphs_NotoSansMonoTtf[95] = {
     { 32, 0, 94, 52, { 0 }},
     { 33, 20, 31, 52, { 0 }},
     { 34, 14, 31, 52, { 0 }},

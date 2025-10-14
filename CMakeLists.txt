@@ -30,6 +30,12 @@ if(UNIX AND NOT APPLE)  # or: if(NOT WIN32)
   target_link_libraries(${PROJECT_NAME} m)
 endif()
 
+if(MSVC)
+    # Supress warnings for integer-float conversions. Otherwise, the default
+    # /W3 warnings are enabled.
+    target_compile_options(${PROJECT_NAME} PRIVATE /wd4244)
+endif()
+
 # Web Configurations
 if (EMSCRIPTEN)
     # Tell Emscripten to build an example.html file.
