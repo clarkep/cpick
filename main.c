@@ -26,10 +26,19 @@ License: GPL-3.0 (see LICENSE)
 
 #define WRITE_INTERVAL 1.0
 
+enum cursor_state {
+	CURSOR_UP,
+	CURSOR_START,
+	CURSOR_DOWN,
+	CURSOR_STOP
+};
+
 struct state {
 	int screenWidth;
 	int screenHeight;
 	int which_fixed; // red(0), green(1) or blue(2)
+	enum cursor_state cursor_state;
+	bool square_dragging;
 	bool val_slider_dragging;
 	// these two represent the same thing...
 	int fixed_value; // 0-255
@@ -147,17 +156,28 @@ void draw_axes(int x, int y, int w, int h, struct state *st)
 	for (int ix = x; ix < (x+512); ix += tick_sep) {
 		DrawRectangle(ix, y+512, tick_width, x_tick_len, tick_color);
 	}
-	// perfectionist last tick
-	DrawRectangle(x+512-tick_width, y+512, tick_width, x_tick_len, tick_color);
 	// y axis
-	for (int iy = y; iy < (y+512); iy += tick_sep) {
-		DrawRectangle(x-y_tick_len, iy, y_tick_len, tick_width, tick_color);
+	for (int yi = 0; yi < (512); yi += tick_sep) {
+		DrawRectangle(x-y_tick_len, y + 511 - yi - tick_width, y_tick_len, tick_width, tick_color);
 	}
-	DrawRectangle(x-y_tick_len, y+512-tick_width, y_tick_len, tick_width, tick_color);
 }
 
 void draw_ui_and_respond_input(struct state *st)
 {
+	if (IsMouseButtonDown(0)) {
+		if (st->cursor_state == CURSOR_UP || st->cursor_state == CURSOR_STOP)
+			st->cursor_state = CURSOR_START;
+		else if (st->cursor_state == CURSOR_START)
+			st->cursor_state = CURSOR_DOWN;
+	} else {
+		if (st->cursor_state == CURSOR_DOWN || st->cursor_state == CURSOR_START) {
+			st->cursor_state = CURSOR_STOP;
+			st->square_dragging = false;
+			st->val_slider_dragging = false;
+		} else if (st->cursor_state == CURSOR_STOP)
+			st->cursor_state = CURSOR_UP;
+	}
+
 	ClearBackground( current_color(st) );
 	Color cur_color = current_color(st);
 	if (cur_color.r*cur_color.r + cur_color.g*cur_color.g + cur_color.b*cur_color.b > 110000) {
@@ -184,12 +204,16 @@ void draw_ui_and_respond_input(struct state *st)
 	DrawRectangle(grad_square_x + square_x_offset - cur_loc_sq_sz/2,
 			grad_square_y + 511 - square_y_offset - cur_loc_sq_sz/2,
 			cur_loc_sq_sz, cur_loc_sq_sz, st->text_color);
-	if (IsMouseButtonDown(0)) {
+	if (st->cursor_state == CURSOR_START || st->square_dragging) {
 		Vector2 pos = GetMousePosition();
-		if (CheckCollisionPointRec(pos, (Rectangle) { grad_square_x, grad_square_y, 512, 512 })) {
+		if (!st->square_dragging && CheckCollisionPointRec(pos,
+			(Rectangle) { grad_square_x, grad_square_y, 512, 512 })) {
+			st->square_dragging = true;
+		}
+		if (st->square_dragging) {
 			// depends on 512...
-			st->x_value = (pos.x - grad_square_x) / 2;
-			st->y_value = (grad_square_y + 511 - pos.y) / 2;
+			st->x_value = MAX(MIN((pos.x - grad_square_x) / 2, 255), 0);
+			st->y_value = MAX(MIN((grad_square_y + 511 - pos.y) / 2, 255), 0);
 		}
 	}
 
@@ -199,7 +223,7 @@ void draw_ui_and_respond_input(struct state *st)
 	int ind_button_h = 60;
 	DrawRectangleLines(ind_button_x, ind_button_y, ind_button_h, ind_button_h, st->text_color);
 	DrawTextEx(st->text_font_large, color_strings[st->which_fixed], (Vector2) {ind_button_x+18, ind_button_y+10}, 40., 2, st->text_color);
-	if (IsMouseButtonPressed(0)) {
+	if (st->cursor_state == CURSOR_START) {
 		Vector2 pos = GetMousePosition();
 		if (CheckCollisionPointRec(pos, (Rectangle) { ind_button_x, ind_button_y, ind_button_h, ind_button_h})) {
 			st->which_fixed = (st->which_fixed + 1) % 3;
@@ -222,18 +246,17 @@ void draw_ui_and_respond_input(struct state *st)
 	Vector2 circle_center = { val_slider_x + val_slider_offset, val_slider_y+30 };
 	DrawCircleV(circle_center, 15,
 			   (Color) { wf == 0 ? 218 : 0, wf == 1 ? 216 : 0,  wf == 2 ? 216 : 0, 255 });
-	if (IsMouseButtonDown(0)) {
+	if (st->cursor_state == CURSOR_START || st->val_slider_dragging) {
 		TraceLog(LOG_DEBUG, "Received click. dragging: %d", st->val_slider_dragging);
 		Vector2 pos = GetMousePosition();
-		if (CheckCollisionPointCircle(pos, circle_center, 30) || st->val_slider_dragging) {
+		if (!st->val_slider_dragging && CheckCollisionPointRec(pos,
+			(Rectangle) { val_slider_x, val_slider_y, val_slider_w, val_slider_h } )) {
 			st->val_slider_dragging = true;
+		} 
+		if (st->val_slider_dragging) {
 			val_slider_offset = MIN(val_slider_w, MAX(0, pos.x - val_slider_x));
-		} else if (CheckCollisionPointRec(pos, (Rectangle) { val_slider_x, val_slider_y, val_slider_w, val_slider_w } )) {
-			val_slider_offset = pos.x - val_slider_x;
 		}
 		st->fixed_value = roundf((float) 255*val_slider_offset / val_slider_w);
-	} else {
-		st->val_slider_dragging = false;
 	}
 
 	// color read out
