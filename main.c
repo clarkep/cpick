@@ -16,8 +16,10 @@ License: GPL-3.0 (see LICENSE)
 #include <stdarg.h>
 #include <errno.h>
 #include <math.h> // round
-#include <raylib.h> // everything CamelCase except...
-#include "noto_sans_mono_ttf.h" // LoadFont_NotoSansMonoTtf
+#include <raylib.h>
+#include "font/noto_sans_mono_small.h"
+#include "font/noto_sans_mono_medium.h"
+#include "font/noto_sans_mono_large.h"
 
 #define MIN(x, y) ((x) <= (y) ? (x) : (y))
 #define MAX(x, y) ((x) > (y) ? (x) : (y))
@@ -35,7 +37,9 @@ struct state {
 	int x_value;
 	int y_value;
 	Color text_color;
-	Font text_font;
+	Font text_font_small;
+	Font text_font_medium;
+	Font text_font_large;
 	struct {
 		char *path;
 		unsigned long offset;
@@ -134,10 +138,10 @@ void draw_axes(int x, int y, int w, int h, struct state *st)
 	Color label_color = st->text_color;
 
 	// x axis label
-	DrawTextEx(st->text_font, color_strings[(st->which_fixed+1)%3],
+	DrawTextEx(st->text_font_small, color_strings[(st->which_fixed+1)%3],
 			   (Vector2) {x + 512/2 - label_size, y + 512 + h - label_size}, label_size, 2.,
 			   label_color);
-	DrawTextEx(st->text_font, color_strings[(st->which_fixed+2)%3],
+	DrawTextEx(st->text_font_small, color_strings[(st->which_fixed+2)%3],
 			   (Vector2) {x - h, y + 512/2 - label_size}, label_size, 2., label_color);
 	// x axis
 	for (int ix = x; ix < (x+512); ix += tick_sep) {
@@ -194,8 +198,7 @@ void draw_ui_and_respond_input(struct state *st)
 	int ind_button_y = grad_square_y_end + x_axis_h + 10;
 	int ind_button_h = 60;
 	DrawRectangleLines(ind_button_x, ind_button_y, ind_button_h, ind_button_h, st->text_color);
-	DrawTextEx(st->text_font, color_strings[st->which_fixed], (Vector2) {ind_button_x+18, ind_button_y+10}, 40., 2, st->text_color);
-	// DrawTextEx(st->text_font, value, (Vector2) {grad_square_x, val_slider_y + 70}, 30., 1.5, st->text_color);
+	DrawTextEx(st->text_font_large, color_strings[st->which_fixed], (Vector2) {ind_button_x+18, ind_button_y+10}, 40., 2, st->text_color);
 	if (IsMouseButtonPressed(0)) {
 		Vector2 pos = GetMousePosition();
 		if (CheckCollisionPointRec(pos, (Rectangle) { ind_button_x, ind_button_y, ind_button_h, ind_button_h})) {
@@ -237,7 +240,7 @@ void draw_ui_and_respond_input(struct state *st)
 	char value[30];
 	sprintf(value, "r:%-3d g:%-3d b:%-3d hex:#%02x%02x%02x", cur_color.r, cur_color.g, cur_color.b, cur_color.r, cur_color.g, cur_color.b);
 
-	DrawTextEx(st->text_font, value, (Vector2) {grad_square_x, val_slider_y + 70}, 30., 1.5, st->text_color);
+	DrawTextEx(st->text_font_medium, value, (Vector2) {grad_square_x, val_slider_y + 70}, 30., 1.5, st->text_color);
 
 	double now = GetTime();
 	if (st->outfile.path && now - st->outfile.last_write_time > WRITE_INTERVAL &&
@@ -252,6 +255,10 @@ void assert_usage(bool p)
 {
 	myassert(p, "usage: cpick [file.txt:offset]\n");
 }
+
+int small_large_codepoints[] = { 'R', 'G', 'B' };
+int medium_codepoints[] = { 'r', 'g', 'b', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '0',
+	'a', 'c', 'd', 'e', 'f', 'h', 'x', ':', ' ', ':', '#'};
 
 int main(int argc, char *argv[])
 {
@@ -301,24 +308,39 @@ int main(int argc, char *argv[])
 	SetTraceLogLevel(LOG_WARNING);
 	InitWindow(st->screenWidth, st->screenHeight, "CPick");
 
-	// to load a font from a ttf file:
-	// st->text_font = LoadFontEx("NotoSansMono.ttf", 120, NULL, 0);
-	st->text_font = LoadFont_NotoSansMonoTtf();
+	/*
+	// Load directly from ttf file(one time)
+	st->text_font_small = LoadFontEx("font/NotoSansMono-Regular.ttf", 22, small_large_codepoints,
+		sizeof(small_large_codepoints)/sizeof(int));
+	st->text_font_medium = LoadFontEx("font/NotoSansMono-Regular.ttf", 30, medium_codepoints,
+		sizeof(medium_codepoints)/sizeof(int));
+	st->text_font_large = LoadFontEx("font/NotoSansMono-Regular.ttf", 40, small_large_codepoints,
+ 		sizeof(small_large_codepoints)/sizeof(int));
+	*/
+	// Now that fonts have been exported, we can load them from embedded data.
+	// TODO: to support hi-dpi, we will have to load at arbitrary sizes, which will require
+	// embedding the actual ttf file. I'm putting that off because it will require some way
+	// to shrink the file first(compress and remove unnecessary chars).
+	st->text_font_small = LoadFont_NotoSansMonoSmall();
+	st->text_font_medium = LoadFont_NotoSansMonoMedium();
+	st->text_font_large = LoadFont_NotoSansMonoLarge();
 
-	SetTargetFPS(60); // idk
-	// Main game loop
+	SetTargetFPS(60);
 	while (!WindowShouldClose())
 	{
 		st->screenWidth = GetScreenWidth();
 		st->screenHeight = GetScreenHeight();
-		// Draw
 		BeginDrawing();
 		draw_ui_and_respond_input(st);
 		EndDrawing();
     }
 
-	// ExportFontAsCode(st->text_font, "noto_sans_mono_ttf.h");
-	// De-Initialization
-	CloseWindow();        // Close window and OpenGL context
+	/*
+    // Export fonts(one time)
+	ExportFontAsCode(st->text_font_small, "font/noto_sans_mono_small.h");
+	ExportFontAsCode(st->text_font_medium, "font/noto_sans_mono_medium.h");
+	ExportFontAsCode(st->text_font_large, "font/noto_sans_mono_large.h");
+	*/
+	CloseWindow();
 	return 0;
 }
