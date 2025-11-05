@@ -264,7 +264,7 @@ static Font LoadFont_NotoSansMonoMedium(void)
     unsigned char *data = DecompressData(fontData_NotoSansMonoMedium, COMPRESSED_DATA_SIZE_FONT_NOTOSANSMONOMEDIUM, &fontDataSize_NotoSansMonoMedium);
     Image imFont = { data, 256, 128, 1, 2 };
 
-    // Load texture from image: removed broken check to isGpuReady
+    // Load texture from image
     font.texture = LoadTextureFromImage(imFont);
     UnloadImage(imFont);  // Uncompressed data can be unloaded from memory
 
