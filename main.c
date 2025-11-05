@@ -116,22 +116,22 @@ void write_color_to_file(struct state *st, Color color)
 
 void draw_gradient_square(int x, int y, int size, int which_fixed, int fixed_val)
 {
-	float n = size;
-	for (int Yi=0; Yi<size; Yi++) {
-		for (int xi=0; xi<size; xi++) {
-			float c1 = ((xi+0.5) * 255.0f) / ((float) size);
-			float c2 = ((Yi+0.5) * 255.0f) / ((float) size);
-			Color col;
-			if (which_fixed == 0) { // red
-				col =  (Color) { fixed_val, c1, c2, 255 };
+	Color corner_cols[4];
+	for (int i=0; i<2; i++) {
+		for (int j=0; j<2; j++) {
+			int c1 = j ? 255 : 0;
+			int c2 = i ? 255 : 0;
+			if (which_fixed == 0) {
+				corner_cols[i*2+j] =  (Color) { fixed_val, c1, c2, 255 };
 			} else if (which_fixed == 1) { // green
-				col = (Color) { c2, fixed_val, c1, 255 };
+				corner_cols[i*2+j] = (Color) { c2, fixed_val, c1, 255 };
 			} else if (which_fixed == 2) { // blue
-				col = (Color) { c1, c2, fixed_val, 255 };
+				corner_cols[i*2+j] = (Color) { c1, c2, fixed_val, 255 };
 			}
-			DrawPixel(x + xi, y + size - Yi - 1, col);
 		}
 	}
+	Rectangle rec = { x, y, size, size };
+	DrawRectangleGradientEx(rec, corner_cols[2], corner_cols[0], corner_cols[1], corner_cols[3]);
 }
 
 // TODO: parameter for 512 vs etc ?
@@ -179,10 +179,11 @@ void draw_ui_and_respond_input(struct state *st)
 			st->cursor_state = CURSOR_UP;
 	}
 
-	float dpi = st->dpi;
 
-	ClearBackground( current_color(st) );
 	Color cur_color = current_color(st);
+	ClearBackground( cur_color );
+
+	float dpi = st->dpi;
 	if (cur_color.r*cur_color.r + cur_color.g*cur_color.g + cur_color.b*cur_color.b > 110000) {
 		st->text_color = BLACK;
 	} else {
@@ -263,6 +264,7 @@ void draw_ui_and_respond_input(struct state *st)
 		st->fixed_value = roundf((float) 255*val_slider_offset / val_slider_w);
 	}
 
+
 	// color read out
 	char value[30];
 	sprintf(value, "r:%-3d g:%-3d b:%-3d hex:#%02x%02x%02x", cur_color.r, cur_color.g, cur_color.b, cur_color.r, cur_color.g, cur_color.b);
@@ -284,9 +286,9 @@ void assert_usage(bool p)
 }
 
 // A bug in raylib's font atlas generation code causes LoadFontEx to fail to load 'B' if the only
-// chars are 'R', 'G', and 'B' when setting up text_font_large. A workaround for now is to add an
-// unnecessary extra character.
-int small_large_codepoints[] = { 'R', 'G', 'B', 'A' };
+// chars are 'R', 'G', and 'B' when setting up text_font_large. A workaround for now is to add
+// unnecessary extra characters.
+int small_large_codepoints[] = { 'R', 'G', 'A', 'B', 'C', 'D', 'E', 'F' };
 int medium_codepoints[] = { 'r', 'g', 'b', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '0',
 	'a', 'c', 'd', 'e', 'f', 'h', 'x', ':', ' ', ':', '#'};
 
