@@ -184,7 +184,9 @@ void draw_ui_and_respond_input(struct state *st)
 	ClearBackground( cur_color );
 
 	float dpi = st->dpi;
-	if (cur_color.r*cur_color.r + cur_color.g*cur_color.g + cur_color.b*cur_color.b > 110000) {
+	// White is especially hard to read against greens and yellows, so count the amount of green
+	// extra when deciding text color.
+	if (cur_color.r*cur_color.r + cur_color.g*cur_color.g*1.5 + cur_color.b*cur_color.b > 97500) {
 		st->text_color = BLACK;
 	} else {
 		st->text_color = WHITE;
@@ -202,12 +204,16 @@ void draw_ui_and_respond_input(struct state *st)
 	draw_axes(grad_square_x, grad_square_y, x_axis_h, y_axis_w, st);
 	draw_gradient_square(grad_square_x, grad_square_y, 512*dpi, st->which_fixed, st->fixed_value);
 	int cur_loc_sq_sz = 4*dpi;
-	// depends on 512...
-	int square_x_offset = st->x_value * (512*dpi / 256.0);
-	int square_y_offset = st->y_value * (512*dpi / 256.0);
-	DrawRectangle(grad_square_x + square_x_offset - cur_loc_sq_sz/2,
-			grad_square_y + 512*dpi - square_y_offset - cur_loc_sq_sz/2,
-			cur_loc_sq_sz, cur_loc_sq_sz, st->text_color);
+	// indicator center point
+	int ind_x = grad_square_x + st->x_value * (512*dpi / 256.0);
+	int ind_y = grad_square_y + 512*dpi - st->y_value * (512*dpi / 256.0);
+	DrawCircleLines(ind_x, ind_y, 6*dpi, st->text_color);
+	int r2 = 4*dpi;
+	int r3 = 8*dpi;
+	DrawLine(ind_x - r3, ind_y, ind_x - r2, ind_y, st->text_color);
+	DrawLine(ind_x + r2, ind_y, ind_x + r3, ind_y, st->text_color);
+	DrawLine(ind_x, ind_y - r3, ind_x, ind_y - r2, st->text_color);
+	DrawLine(ind_x, ind_y + r2, ind_x, ind_y + r3, st->text_color);
 	if (st->cursor_state == CURSOR_START || st->square_dragging) {
 		Vector2 pos = GetMousePosition();
 		if (!st->square_dragging && CheckCollisionPointRec(pos,
@@ -218,11 +224,12 @@ void draw_ui_and_respond_input(struct state *st)
 			// depends on 512...
 			st->x_value = MAX(MIN((pos.x - grad_square_x) / (512*dpi / 256.0), 255), 0);
 			// xx off by one?
-			st->y_value = MAX(MIN((grad_square_y + 512*dpi - pos.y) / (512*dpi / 256.0), 255), 0);
+			int y_adj = 2*dpi;
+			st->y_value = MAX(MIN((grad_square_y + 512*dpi - pos.y + y_adj) / (512*dpi / 256.0), 255), 0);
 		}
 	}
 
-	// indicator button
+	// fixed color button
 	int ind_button_x = grad_square_x;
 	int ind_button_y = grad_square_y_end + x_axis_h + 10*dpi;
 	int ind_button_h = 60*dpi;
