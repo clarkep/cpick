@@ -37,18 +37,21 @@ struct state {
 	int screenWidth;
 	int screenHeight;
 	float dpi;
-	int which_fixed; // red(0), green(1) or blue(2)
+	int mode; // rgb(0) or hsv(1)
+	int which_fixed; // red(0), green(1) or blue(2); or hue(0), saturation(1), or value(2)
+	int saved_fixed; // in rgb mode, a fixed hsv to go back to; in hsv mode, an rgb
 	enum cursor_state cursor_state;
 	bool square_dragging;
 	bool val_slider_dragging;
 	// these two represent the same thing...
-	int fixed_value; // 0-255
-	// last click in the square, in pixels:
-	int x_value;
-	int y_value;
+	float fixed_value; // 0-1
+	// the other two dims, usually x and y but can be theta/r when fixed=value.
+	float x_value;
+	float y_value;
 	Color text_color;
 	Font text_font_small;
 	Font text_font_medium;
+	int medium_label_width;
 	Font text_font_large;
 	struct {
 		char *path;
@@ -60,7 +63,7 @@ struct state {
 	bool debug;
 };
 
-char *color_strings[3] = { "R", "G", "B" };
+char *color_strings[2][3] = { "R", "G", "B", "H", "S", "V" };
 
 void myassert(bool p, char *fmt, ...) {
 	if (!p) {
@@ -76,26 +79,46 @@ bool colors_equal(Color c1, Color c2) {
 	return c1.r == c2.r && c1.g == c2.g && c1.b == c2.b && c1.a == c2.a;
 }
 
-Color current_color(struct state *st)
+struct color_info {
+	Color rgb;
+	Vector3 hsv;
+};
+
+struct color_info current_color(struct state *st)
 {
-	int v1 = st->fixed_value;
-	int v2 = st->x_value;
-	int v3 = st->y_value;
-	switch (st->which_fixed) {
+	struct color_info res;
+	if (st->mode == 0) {
+		int v1 = roundf(255.0f * st->fixed_value);
+		int v2 = roundf(255.0f * st->x_value);
+		int v3 = roundf(255.0f * st->y_value);
+		switch (st->which_fixed) {
 		case 0:
-			return (Color) { v1, v2, v3, 255 };
+			res.rgb = (Color) { v1, v2, v3, 255 };
 			break;
 		case 1:
-			return (Color) { v3, v1, v2, 255 };
+			res.rgb = (Color) { v3, v1, v2, 255 };
 			break;
 		case 2:
-			return (Color) { v2, v3, v1, 255 };
+			res.rgb = (Color) { v2, v3, v1, 255 };
 			break;
-		default:
-			// Avoid warnings about not all control paths returning
-			return (Color) { v1, v2, v3, 255 };
-			break;
+		}
+		res.hsv = ColorToHSV(res.rgb);
+	} else {
+		switch (st->which_fixed) {
+		case 0:
+			res.hsv = (Vector3) { st->fixed_value * 360, st->x_value, st->y_value };
+		break;
+		case 1:
+			res.hsv = (Vector3) { st->x_value * 360, st->fixed_value, st->y_value };
+		break;
+		case 2:
+			// x=theta, y=r
+			res.hsv = (Vector3) { st->x_value * 360, st->y_value, st->fixed_value };
+		break;
+		}
+		res.rgb = ColorFromHSV(res.hsv.x, res.hsv.y, res.hsv.z);
 	}
+	return res;
 }
 
 void write_color_to_file(struct state *st, Color color)
@@ -114,24 +137,117 @@ void write_color_to_file(struct state *st, Color color)
 	fclose(f);
 }
 
-void draw_gradient_square(int x, int y, int size, int which_fixed, int fixed_val)
+void draw_gradient_square_rgb(int x, int y, int size, int which_fixed, float fixed_val)
 {
 	Color corner_cols[4];
 	for (int i=0; i<2; i++) {
 		for (int j=0; j<2; j++) {
 			int c1 = j ? 255 : 0;
 			int c2 = i ? 255 : 0;
+			int f = roundf(255.0 * fixed_val);
 			if (which_fixed == 0) {
-				corner_cols[i*2+j] =  (Color) { fixed_val, c1, c2, 255 };
+				corner_cols[i*2+j] =  (Color) { f, c1, c2, 255 };
 			} else if (which_fixed == 1) { // green
-				corner_cols[i*2+j] = (Color) { c2, fixed_val, c1, 255 };
+				corner_cols[i*2+j] = (Color) { c2, f, c1, 255 };
 			} else if (which_fixed == 2) { // blue
-				corner_cols[i*2+j] = (Color) { c1, c2, fixed_val, 255 };
+				corner_cols[i*2+j] = (Color) { c1, c2, f, 255 };
 			}
 		}
 	}
 	Rectangle rec = { x, y, size, size };
 	DrawRectangleGradientEx(rec, corner_cols[2], corner_cols[0], corner_cols[1], corner_cols[3]);
+}
+
+// TODO: Convert to shader.
+void draw_gradient_square_hsv(int x, int y, int size, int which_fixed, float fixed_val)
+{
+	for (int yi=0; yi<size; yi++) {
+		for (int xi=0; xi<size; xi++) {
+			Color col;
+			if (which_fixed == 0) {
+				col = ColorFromHSV(fixed_val * 360.0f, xi / (float) size, yi / (float) size);
+				DrawPixel(x + xi, y + size - yi - 1, col);
+			} else if (which_fixed == 1) {
+				col = ColorFromHSV(xi * 360.0f / (float) size, fixed_val, yi / (float) size);
+				DrawPixel(x + xi, y + size - yi - 1, col);
+			}
+		}
+	}
+}
+
+// TODO: Convert to shader.
+void draw_gradient_circle_and_axes(int x, int y, int r, float fixed_val, struct state *st)
+{
+	int cur_xmax = r;
+	for (int yi=0; yi<r; yi++) {
+		for (int xi=0; xi<cur_xmax; xi++) {
+			float ri = sqrtf((float) yi*yi + (float) xi*xi);
+			if (ri > r) {
+				cur_xmax = xi;
+				break;
+			}
+			float theta1 = (atan2f(yi, xi) / (2*PI))*360.0f;
+			float theta2 = 180.0f - theta1;
+			float theta3 = theta1 + 180.0f;
+			float theta4 = theta2 + 180.0f;
+			Color col1 = ColorFromHSV(theta1, ri/(float)r, fixed_val);
+			Color col2 = ColorFromHSV(theta2, ri/(float)r, fixed_val);
+			Color col3 = ColorFromHSV(theta3, ri/(float)r, fixed_val);
+			Color col4 = ColorFromHSV(theta4, ri/(float)r, fixed_val);
+			DrawPixel(x + xi, y - yi, col1);
+			DrawPixel(x - xi, y - yi, col2);
+			DrawPixel(x - xi, y + yi, col3);
+			DrawPixel(x + xi, y + yi, col4);
+		}
+	}
+	float dpi = st->dpi;
+	for (float ang=0.0f; ang<360.0f; ang+=30.0) {
+		float dx = cosf(ang*2*PI/360.0f);
+		float dy = sinf(ang*2*PI/360.0f);
+		int length = 5*dpi;
+		Vector2 start = { x + r * dx, y + r * dy };
+		Vector2 end = { start.x + length * dx, start.y + length * dy };
+		DrawLineEx(start, end, 2.0*dpi, st->text_color);
+	}
+	// s arrow
+	int arrow_len = 45*dpi;
+	float arrow_w = 2.0*dpi;
+	// int  = 4*dpi;
+	// arrowhead
+	float ah_len = 13*dpi;
+	float ah_ang = (180-28)*2*PI/360.0f;
+	float ah_w = 2.0*dpi;
+	Vector2 arrow_end = (Vector2) { x+r+arrow_len, y};
+	DrawLineEx((Vector2) {x+r+12*dpi, y}, arrow_end, arrow_w, st->text_color);
+	Vector2 ah_left = { arrow_end.x + ah_len*cosf(ah_ang), arrow_end.y + ah_len*sinf(ah_ang)};
+	Vector2 ah_right = { arrow_end.x + ah_len*cosf(-ah_ang), arrow_end.y + ah_len*sinf(-ah_ang)};
+	DrawLineEx(arrow_end, ah_left, ah_w, st->text_color);
+	DrawLineEx(arrow_end, ah_right, ah_w, st->text_color);
+	DrawTextEx(st->text_font_small, "S",
+			   (Vector2) {arrow_end.x-16.0*dpi, arrow_end.y-31.0*dpi}, 22*dpi, 2.*dpi,
+			   st->text_color);
+	// h label
+	float harr_d = 30*dpi;
+	float harr_w = 2*dpi;
+	float harr_ang1 = 12;
+	float harr_ang2 = 28;
+	Vector2 harr_end = { x + (r+harr_d+harr_w/2)*cosf(2*PI*harr_ang2/360.0f),
+		y - (r+harr_d+harr_w/2)*sinf(2*PI*harr_ang2/360.0f) };
+	float harr_dir_ang = (harr_ang2*2*PI / 360.0f) + PI / 2;
+	float adj = 2*PI/120;
+	// xx angles are set up so that left arrowhead goes straight down, but still looks a bit janky
+		Vector2 h_ah_left = { harr_end.x /*+ah_len*cosf(harr_dir_ang+ah_ang+adj)*/,
+		harr_end.y-ah_len*sinf(harr_dir_ang+ah_ang+adj)};
+	Vector2 h_ah_right = { harr_end.x+ah_len*cosf(harr_dir_ang-ah_ang+adj),
+		harr_end.y-ah_len*sinf(harr_dir_ang-ah_ang+adj)};
+	Color c3 = st->text_color;
+	DrawLineEx(harr_end, h_ah_left, ah_w, c3);
+	DrawLineEx(harr_end, h_ah_right, ah_w, c3);
+	DrawTextEx(st->text_font_small, "H",
+		(Vector2) {harr_end.x+18*dpi, harr_end.y-2*dpi}, 22*dpi, 2.*dpi, st->text_color);
+	DrawRing((Vector2){x,y}, r+harr_d, r+harr_d+harr_w, -harr_ang1, -harr_ang2, 30, st->text_color);
+	// Color c2 = { 255, 0, 0, 255 };
+	// DrawPixelV(harr_end, c2);
 }
 
 // TODO: parameter for 512 vs etc ?
@@ -147,11 +263,11 @@ void draw_axes(int x, int y, int w, int h, struct state *st)
 	Color label_color = st->text_color;
 
 	// x axis label
-	DrawTextEx(st->text_font_small, color_strings[(st->which_fixed+1)%3],
+	DrawTextEx(st->text_font_small, color_strings[st->mode][(st->which_fixed+1)%3],
 			   (Vector2) {x + 512*dpi/2 - label_size, y + 512*dpi + h - label_size}, label_size,
 			   2.*dpi, label_color);
 	// y axis label
-	DrawTextEx(st->text_font_small, color_strings[(st->which_fixed+2)%3],
+	DrawTextEx(st->text_font_small, color_strings[st->mode][(st->which_fixed+2)%3],
 			   (Vector2) {x - h, y + 512*dpi/2 - label_size}, label_size, 2.*dpi, label_color);
 	// x axis
 	for (int ix = x; ix < (x+512*dpi); ix += tick_sep) {
@@ -180,19 +296,21 @@ void draw_ui_and_respond_input(struct state *st)
 	}
 
 
-	Color cur_color = current_color(st);
+	struct color_info ci = current_color(st);
+	Color cur_color = ci.rgb;
+	Vector3 cur_hsv = ci.hsv;
 	ClearBackground( cur_color );
 
 	float dpi = st->dpi;
-	// White is especially hard to read against greens and yellows, so count the amount of green
-	// extra when deciding text color.
-	if (cur_color.r*cur_color.r + cur_color.g*cur_color.g*1.5 + cur_color.b*cur_color.b > 97500) {
+	// White is especially hard to read against greens and yellows, so count green extra when
+	// deciding text color.
+	if (cur_color.r*cur_color.r + cur_color.g*cur_color.g*1.6 + cur_color.b*cur_color.b > 97500) {
 		st->text_color = BLACK;
 	} else {
 		st->text_color = WHITE;
 	}
 
-	// gradient square
+	// gradient object
 	int y_axis_w = 30*dpi;
 	int x_axis_h = 30*dpi;
 	int grad_square_w = 512*dpi + y_axis_w;
@@ -201,12 +319,33 @@ void draw_ui_and_respond_input(struct state *st)
 	int grad_square_y = 30*dpi;
 	int grad_square_y_end = grad_square_y + 512*dpi;
 	int grad_square_x_end = grad_square_x + 512*dpi;
-	draw_axes(grad_square_x, grad_square_y, x_axis_h, y_axis_w, st);
-	draw_gradient_square(grad_square_x, grad_square_y, 512*dpi, st->which_fixed, st->fixed_value);
+	bool square = true;
+	int cx = grad_square_x + 512*dpi/2;
+	int cy = grad_square_y + 512*dpi/2;
+	int cr = 512*dpi/2;
+	if (st->mode == 0) {
+		draw_gradient_square_rgb(grad_square_x, grad_square_y, 512*dpi, st->which_fixed, st->fixed_value);
+		draw_axes(grad_square_x, grad_square_y, x_axis_h, y_axis_w, st);
+	} else {
+		if (st->which_fixed == 2) {
+			square = false;
+			draw_gradient_circle_and_axes(cx, cy, cr, st->fixed_value, st);
+		} else {
+			draw_gradient_square_hsv(grad_square_x, grad_square_y, 512*dpi, st->which_fixed,
+				st->fixed_value);
+			draw_axes(grad_square_x, grad_square_y, x_axis_h, y_axis_w, st);
+		}
+	}
 	int cur_loc_sq_sz = 4*dpi;
-	// indicator center point
-	int ind_x = grad_square_x + st->x_value * (512*dpi / 256.0);
-	int ind_y = grad_square_y + 512*dpi - st->y_value * (512*dpi / 256.0);
+	// indicator circle
+	int ind_x, ind_y;
+	if (square) {
+		ind_x = grad_square_x + st->x_value * (512*dpi);
+		ind_y = grad_square_y + 512*dpi - st->y_value * (512*dpi);
+	} else {
+		ind_x = cx + cr*st->y_value*cosf(st->x_value * 2*PI);
+		ind_y = cy - cr*st->y_value*sinf(st->x_value * 2*PI);
+	}
 	DrawCircleLines(ind_x, ind_y, 6*dpi, st->text_color);
 	int r2 = 4*dpi;
 	int r3 = 8*dpi;
@@ -216,45 +355,123 @@ void draw_ui_and_respond_input(struct state *st)
 	DrawLine(ind_x, ind_y + r2, ind_x, ind_y + r3, st->text_color);
 	if (st->cursor_state == CURSOR_START || st->square_dragging) {
 		Vector2 pos = GetMousePosition();
-		if (!st->square_dragging && CheckCollisionPointRec(pos,
-			(Rectangle) { grad_square_x, grad_square_y, 512*dpi, 512*dpi })) {
-			st->square_dragging = true;
+		if (!st->square_dragging) {
+			Rectangle rec = {grad_square_x, grad_square_y, 512*dpi, 512*dpi};
+			Vector2 c = { grad_square_x + 512*dpi/2, grad_square_y + 512*dpi/2 };
+			if ((square && CheckCollisionPointRec(pos, rec))
+				|| (!square && CheckCollisionPointCircle(pos, c, 512*dpi/2))) {
+				st->square_dragging = true;
+			}
 		}
 		if (st->square_dragging) {
-			// depends on 512...
-			st->x_value = MAX(MIN((pos.x - grad_square_x) / (512*dpi / 256.0), 255), 0);
-			// xx off by one?
-			int y_adj = 2*dpi;
-			st->y_value = MAX(MIN((grad_square_y + 512*dpi - pos.y + y_adj) / (512*dpi / 256.0), 255), 0);
+			int y_adj = 3*dpi;
+			int x_adj = 2*dpi;
+			if (square) {
+				st->x_value = MIN(MAX((pos.x - x_adj - grad_square_x) / (512*dpi), 0.0f), 1.0f);
+				// xx off by one?
+				st->y_value = MIN(MAX((grad_square_y + 512*dpi - pos.y + y_adj) / (512*dpi), 0.0f), 1.0f);
+			} else {
+				int x_res = pos.x -x_adj - (grad_square_x + 512*dpi/2);
+				int y_res = pos.y - y_adj - (grad_square_y + 512*dpi/2);
+				y_res = -y_res;
+				// theta
+				st->x_value = atan2(y_res, x_res) / (2*PI);
+				st->x_value = st->x_value < 0 ? 1.0 + st->x_value : st->x_value;
+				// r
+				st->y_value = MIN(MAX(sqrtf(x_res*x_res+y_res*y_res)/(512*dpi/2), 0.0), 1.0);
+			}
 		}
 	}
 
 	// fixed color button
 	int ind_button_x = grad_square_x;
 	int ind_button_y = grad_square_y_end + x_axis_h + 10*dpi;
-	int ind_button_h = 60*dpi;
+	int ind_button_h = 70*dpi;
 	DrawRectangleLines(ind_button_x, ind_button_y, ind_button_h, ind_button_h, st->text_color);
-	DrawTextEx(st->text_font_large, color_strings[st->which_fixed], (Vector2) {ind_button_x+18*dpi, ind_button_y+10*dpi}, 40.*dpi, 2*dpi, st->text_color);
+	DrawTextEx(st->text_font_large, color_strings[st->mode][st->which_fixed],
+		(Vector2) {ind_button_x+23*dpi, ind_button_y+15*dpi}, 40.*dpi, 2*dpi, st->text_color);
 	if (st->cursor_state == CURSOR_START) {
 		Vector2 pos = GetMousePosition();
 		if (CheckCollisionPointRec(pos, (Rectangle) { ind_button_x, ind_button_y, ind_button_h, ind_button_h})) {
 			st->which_fixed = (st->which_fixed + 1) % 3;
+			if (st->mode == 1 && st->which_fixed == 1) {
+				float tmp = st->fixed_value;
+				st->fixed_value = st->x_value;
+				st->x_value = tmp;
+			} else if (st->mode == 1 && st->which_fixed == 2) {
+				float tmp = st->fixed_value;
+				st->fixed_value = st->y_value;
+				st->y_value = st->fixed_value;
+			} else {
+				// Preserve color: x becomes the new fixed, y the new x, fixed the new y
+				float tmp = st->fixed_value;
+				st->fixed_value = st->x_value;
+				st->x_value = st->y_value;
+				st->y_value = tmp;
+			}
+		}
+	}
+
+	// hsv-rgb toggle
+	int toggle_button_x = ind_button_x;
+	int toggle_button_y = ind_button_y + ind_button_h + 3*dpi;
+	int toggle_button_w = ind_button_h;
+	int toggle_button_h = 20*dpi;
+	DrawRectangleLines(toggle_button_x, toggle_button_y, toggle_button_w, toggle_button_h,
+		st->text_color);
+	DrawTextEx(st->text_font_small, "RGB/HSV", (Vector2) { toggle_button_x+2*dpi,
+		toggle_button_y-1*dpi }, 22*dpi, 0*dpi, st->text_color);
+	if (st->cursor_state == CURSOR_START) {
+		Vector2 pos = GetMousePosition();
+		if (CheckCollisionPointRec(pos, (Rectangle) { toggle_button_x, toggle_button_y,
+			toggle_button_w, toggle_button_h})) {
+			st->mode = (st->mode + 1) % 2;
 			// Preserve color: x becomes the new fixed, y the new x, fixed the new y
-			int tmp = st->fixed_value;
-			st->fixed_value = st->x_value;
-			st->x_value = st->y_value;
-			st->y_value = tmp;
+			int tmp = st->which_fixed;
+			st->which_fixed = st->saved_fixed;
+			st->saved_fixed = tmp;
+			if (st->mode) {
+				if (st->which_fixed == 0) {
+					st->fixed_value = cur_hsv.x / 360;
+					st->x_value = cur_hsv.y;
+					st->y_value = cur_hsv.z;
+				} else if (st->which_fixed == 1) {
+					st->fixed_value = cur_hsv.y;
+					st->x_value = cur_hsv.x / 360;
+					st->y_value = cur_hsv.z;
+				} else if (st->which_fixed == 2) {
+					st->fixed_value = cur_hsv.z;
+					st->x_value = cur_hsv.x / 360;
+					st->y_value = cur_hsv.y;
+				}
+			} else {
+				if (st->which_fixed == 0) {
+					st->fixed_value = cur_color.r / 255.0f;
+					st->x_value = cur_color.g / 255.0f;
+					st->y_value = cur_color.b / 255.0f;
+				} else if (st->which_fixed == 1) {
+					st->fixed_value = cur_color.g / 255.0f;
+					st->x_value = cur_color.b / 255.0f;
+					st->y_value = cur_color.r / 255.0f;
+				} else if (st->which_fixed == 2) {
+					st->fixed_value = cur_color.b / 255.0f;
+					st->x_value = cur_color.r / 255.0f;
+					st->y_value = cur_color.g / 255.0f;
+				}
+			}
 		}
 	}
 
 	// fixed value slider
 	int val_slider_x = ind_button_x + ind_button_h + 20*dpi;
-	int val_slider_y = ind_button_y;
 	int val_slider_w = grad_square_x_end - val_slider_x;
 	int val_slider_h = 60*dpi;
+	// center vertically relative to two adjacent buttons
+	int toggle_button_y_end = toggle_button_y + toggle_button_h;
+	int val_slider_y = ind_button_y + ((toggle_button_y_end-ind_button_y) - val_slider_h) / 2;
 	DrawRectangle(val_slider_x, val_slider_y+26*dpi, val_slider_w, 6*dpi, st->text_color);
 	int wf = st->which_fixed;
-	int val_slider_offset = roundf(val_slider_w * ( (float) st->fixed_value / 255 ));
+	int val_slider_offset = roundf(val_slider_w * ( (float) st->fixed_value ));
 	Vector2 circle_center = { val_slider_x + val_slider_offset, val_slider_y+30*dpi };
 	DrawCircleV(circle_center, 15*dpi,
 			   (Color) { wf == 0 ? 218 : 0, wf == 1 ? 216 : 0,  wf == 2 ? 216 : 0, 255 });
@@ -268,15 +485,28 @@ void draw_ui_and_respond_input(struct state *st)
 		if (st->val_slider_dragging) {
 			val_slider_offset = MIN(val_slider_w, MAX(0, pos.x - val_slider_x));
 		}
-		st->fixed_value = roundf((float) 255*val_slider_offset / val_slider_w);
+		st->fixed_value = MIN(MAX((float) val_slider_offset / val_slider_w, 0), 1.0);
 	}
 
 
 	// color read out
-	char value[30];
-	sprintf(value, "r:%-3d g:%-3d b:%-3d hex:#%02x%02x%02x", cur_color.r, cur_color.g, cur_color.b, cur_color.r, cur_color.g, cur_color.b);
+	char value[40];
+	sprintf(value, "r:%-3d g:%-3d b:%-3d hex:#%02x%02x%02x", cur_color.r, cur_color.g, cur_color.b,
+		cur_color.r, cur_color.g, cur_color.b);
 
-	DrawTextEx(st->text_font_medium, value, (Vector2) {grad_square_x, val_slider_y + 70*dpi}, 30.*dpi, 1.5*dpi, st->text_color);
+	int label_x = (st->screenWidth - st->medium_label_width) / 2;
+	DrawTextEx(st->text_font_medium, value, (Vector2) {label_x, val_slider_y + 85*dpi}, 30.*dpi,
+		1.5*dpi, st->text_color);
+	char h_value[8];
+	sprintf(h_value, "%d\xc2\xb0", (int) cur_hsv.x);
+	char s_value[10];
+	sprintf(s_value, "%d%%", (int)(cur_hsv.y*100));
+	char v_value[10];
+	sprintf(v_value, "%d%%", (int)(cur_hsv.z*100));
+	char hsv_value[30];
+	sprintf(hsv_value, "h:%-5s s:%-4s v:%-3s", h_value, s_value, v_value);
+	DrawTextEx(st->text_font_medium, hsv_value, (Vector2) {label_x, val_slider_y + 125*dpi}, 30.*dpi,
+		1.5*dpi, st->text_color);
 
 	double now = GetTime();
 	if (st->outfile.path && now - st->outfile.last_write_time > WRITE_INTERVAL &&
@@ -295,9 +525,11 @@ void assert_usage(bool p)
 // A bug in raylib's font atlas generation code causes LoadFontEx to fail to load 'B' if the only
 // chars are 'R', 'G', and 'B' when setting up text_font_large. A workaround for now is to add
 // unnecessary extra characters.
-int small_large_codepoints[] = { 'R', 'G', 'A', 'B', 'C', 'D', 'E', 'F' };
-int medium_codepoints[] = { 'r', 'g', 'b', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '0',
-	'a', 'c', 'd', 'e', 'f', 'h', 'x', ':', ' ', ':', '#'};
+int small_codepoints[] = { 'R', 'G', 'B', 'H', 'S', 'V', '/', 'r', 'g', 'b', 'h', 's', 'v', 'A', 'B',
+	'C', 'D', 'E', 'F' };
+int medium_codepoints[] = { 'r', 'g', 'b', 'h', 's', 'v', '0', '1', '2', '3', '4', '5', '6', '7',
+	'8', '9', '0', 'a', 'c', 'd', 'e', 'f', 'x', ':', ' ', ':', '#', '%', 0xb0 };
+int large_codepoints[] = { 'R', 'G', 'H', 'S', 'V', 'A', 'B', 'C', 'D', 'E', 'F' };
 
 void init_for_dpi(struct state *st, float dpi, float old_dpi)
 {
@@ -311,21 +543,28 @@ void init_for_dpi(struct state *st, float dpi, float old_dpi)
 		st->screenHeight = GetScreenHeight();
 	}
 
+	// TODO: build font into executable
 	st->text_font_small = LoadFontEx("font/NotoSansMono-Regular.ttf", 22*dpi,
-		small_large_codepoints, sizeof(small_large_codepoints)/sizeof(int));
+		small_codepoints, sizeof(small_codepoints)/sizeof(int));
 	st->text_font_medium = LoadFontEx("font/NotoSansMono-Regular.ttf", 30*dpi, medium_codepoints,
 		sizeof(medium_codepoints)/sizeof(int));
-	st->text_font_large = LoadFontEx("font/NotoSansMono-Regular.ttf", 40*dpi, small_large_codepoints,
- 		sizeof(small_large_codepoints)/sizeof(int));
+	st->text_font_large = LoadFontEx("font/NotoSansMono-Regular.ttf", 40*dpi, large_codepoints,
+ 		sizeof(large_codepoints)/sizeof(int));
+
+	// Measure the label width once; since it's a monospace font, it will be the same for all colors.
+	st->medium_label_width = MeasureTextEx(st->text_font_medium, "r:255 g:255 b:255 hex:#ffffff",
+		30*dpi, 1.5*dpi).x;
 }
 
 int main(int argc, char *argv[])
 {
 	struct state *st = (struct state *) calloc(1, sizeof(struct state));
-	st->screenWidth = 620;
-	st->screenHeight = 700;
-	st->which_fixed = 0;
-	st->fixed_value = 0;
+	st->screenWidth = 680;
+	st->screenHeight = 780;
+	st->mode = 0;
+	st->which_fixed = 2;
+	st->saved_fixed = 2;
+	st->fixed_value = 0.0;
 	st->x_value = 0;
 	st->y_value = 0;
 	st->text_color = WHITE;
@@ -365,7 +604,7 @@ int main(int argc, char *argv[])
 
 	SetConfigFlags(FLAG_WINDOW_RESIZABLE);
 	SetTraceLogLevel(LOG_WARNING);
-	InitWindow(st->screenWidth, st->screenHeight, "CPick");
+	InitWindow(st->screenWidth, st->screenHeight, "Cpick");
 
 	st->dpi = GetWindowScaleDPI().x;
 	init_for_dpi(st, st->dpi, 1);
