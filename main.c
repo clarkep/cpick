@@ -210,7 +210,7 @@ void draw_gradient_circle_and_axes(int x, int y, int r, float fixed_val, struct 
 		DrawLineEx(start, end, 2.0*dpi, st->text_color);
 	}
 	// s arrow
-	int arrow_len = 45*dpi;
+	int arrow_len = 60*dpi;
 	float arrow_w = 2.0*dpi;
 	// int  = 4*dpi;
 	// arrowhead
@@ -263,11 +263,20 @@ void draw_axes(int x, int y, int w, int h, struct state *st)
 	Color label_color = st->text_color;
 
 	// x axis label
-	DrawTextEx(st->text_font_small, color_strings[st->mode][(st->which_fixed+1)%3],
+	char *x_label;
+	char *y_label;
+	if (!(st->mode == 1 && st->which_fixed == 1)) {
+		x_label = color_strings[st->mode][(st->which_fixed+1)%3];
+		y_label = color_strings[st->mode][(st->which_fixed+2)%3];
+	} else {
+		x_label = color_strings[1][0];
+		y_label = color_strings[1][2];
+	}
+	DrawTextEx(st->text_font_small, x_label,
 			   (Vector2) {x + 512*dpi/2 - label_size, y + 512*dpi + h - label_size}, label_size,
 			   2.*dpi, label_color);
 	// y axis label
-	DrawTextEx(st->text_font_small, color_strings[st->mode][(st->which_fixed+2)%3],
+	DrawTextEx(st->text_font_small, y_label,
 			   (Vector2) {x - h, y + 512*dpi/2 - label_size}, label_size, 2.*dpi, label_color);
 	// x axis
 	for (int ix = x; ix < (x+512*dpi); ix += tick_sep) {
@@ -276,6 +285,45 @@ void draw_axes(int x, int y, int w, int h, struct state *st)
 	// y axis
 	for (int yi = 0; yi < (512*dpi); yi += tick_sep) {
 		DrawRectangle(x-y_tick_len, y + 512*dpi - yi - tick_width, y_tick_len, tick_width, tick_color);
+	}
+}
+
+void switch_into_mode(struct state *st, int mode, struct color_info ci)
+{
+	Color cur_color = ci.rgb;
+	Vector3 cur_hsv = ci.hsv;
+	st->mode = mode;
+	int tmp = st->which_fixed;
+	st->which_fixed = st->saved_fixed;
+	st->saved_fixed = tmp;
+	if (st->mode) {
+		if (st->which_fixed == 0) {
+			st->fixed_value = cur_hsv.x / 360;
+			st->x_value = cur_hsv.y;
+			st->y_value = cur_hsv.z;
+		} else if (st->which_fixed == 1) {
+			st->fixed_value = cur_hsv.y;
+			st->x_value = cur_hsv.x / 360;
+			st->y_value = cur_hsv.z;
+		} else if (st->which_fixed == 2) {
+			st->fixed_value = cur_hsv.z;
+			st->x_value = cur_hsv.x / 360;
+			st->y_value = cur_hsv.y;
+		}
+	} else {
+		if (st->which_fixed == 0) {
+			st->fixed_value = cur_color.r / 255.0f;
+			st->x_value = cur_color.g / 255.0f;
+			st->y_value = cur_color.b / 255.0f;
+		} else if (st->which_fixed == 1) {
+			st->fixed_value = cur_color.g / 255.0f;
+			st->x_value = cur_color.b / 255.0f;
+			st->y_value = cur_color.r / 255.0f;
+		} else if (st->which_fixed == 2) {
+			st->fixed_value = cur_color.b / 255.0f;
+			st->x_value = cur_color.r / 255.0f;
+			st->y_value = cur_color.g / 255.0f;
+		}
 	}
 }
 
@@ -417,48 +465,32 @@ void draw_ui_and_respond_input(struct state *st)
 	int toggle_button_y = ind_button_y + ind_button_h + 3*dpi;
 	int toggle_button_w = ind_button_h;
 	int toggle_button_h = 20*dpi;
+	Color toggle_selected_bg;
+	Color toggle_unselected_bg;
+	if (st->text_color.r < 128) { // black text
+		toggle_selected_bg = (Color) { 224, 224, 224, 255 };
+		toggle_unselected_bg = (Color) { 160, 160, 160, 255 };
+	} else { // white text
+		toggle_selected_bg = (Color) { 176, 176, 176, 255 };
+		toggle_unselected_bg = (Color) { 112, 112, 112, 255 };
+	}
+	DrawRectangle(toggle_button_x, toggle_button_y, toggle_button_w/2, toggle_button_h,
+		st->mode ? toggle_unselected_bg : toggle_selected_bg);
+	DrawRectangle(toggle_button_x + toggle_button_w/2, toggle_button_y, toggle_button_w/2,
+		toggle_button_h, st->mode ? toggle_selected_bg : toggle_unselected_bg);
 	DrawRectangleLines(toggle_button_x, toggle_button_y, toggle_button_w, toggle_button_h,
 		st->text_color);
-	DrawTextEx(st->text_font_small, "RGB/HSV", (Vector2) { toggle_button_x+2*dpi,
+	DrawTextEx(st->text_font_small, "RGB", (Vector2) { toggle_button_x+4*dpi,
+		toggle_button_y-1*dpi }, 22*dpi, 0*dpi, st->text_color);
+	DrawTextEx(st->text_font_small, "HSV", (Vector2) { toggle_button_x+toggle_button_w/2+4*dpi,
 		toggle_button_y-1*dpi }, 22*dpi, 0*dpi, st->text_color);
 	if (st->cursor_state == CURSOR_START) {
 		Vector2 pos = GetMousePosition();
-		if (CheckCollisionPointRec(pos, (Rectangle) { toggle_button_x, toggle_button_y,
-			toggle_button_w, toggle_button_h})) {
-			st->mode = (st->mode + 1) % 2;
-			// Preserve color: x becomes the new fixed, y the new x, fixed the new y
-			int tmp = st->which_fixed;
-			st->which_fixed = st->saved_fixed;
-			st->saved_fixed = tmp;
-			if (st->mode) {
-				if (st->which_fixed == 0) {
-					st->fixed_value = cur_hsv.x / 360;
-					st->x_value = cur_hsv.y;
-					st->y_value = cur_hsv.z;
-				} else if (st->which_fixed == 1) {
-					st->fixed_value = cur_hsv.y;
-					st->x_value = cur_hsv.x / 360;
-					st->y_value = cur_hsv.z;
-				} else if (st->which_fixed == 2) {
-					st->fixed_value = cur_hsv.z;
-					st->x_value = cur_hsv.x / 360;
-					st->y_value = cur_hsv.y;
-				}
-			} else {
-				if (st->which_fixed == 0) {
-					st->fixed_value = cur_color.r / 255.0f;
-					st->x_value = cur_color.g / 255.0f;
-					st->y_value = cur_color.b / 255.0f;
-				} else if (st->which_fixed == 1) {
-					st->fixed_value = cur_color.g / 255.0f;
-					st->x_value = cur_color.b / 255.0f;
-					st->y_value = cur_color.r / 255.0f;
-				} else if (st->which_fixed == 2) {
-					st->fixed_value = cur_color.b / 255.0f;
-					st->x_value = cur_color.r / 255.0f;
-					st->y_value = cur_color.g / 255.0f;
-				}
-			}
+		Rectangle cur_rect;
+		cur_rect = (Rectangle) { toggle_button_x + (st->mode ? 0 : toggle_button_w/2), toggle_button_y,
+			toggle_button_w/2, toggle_button_h };
+		if (CheckCollisionPointRec(pos, cur_rect)) {
+			switch_into_mode(st, (st->mode + 1) % 2, ci);
 		}
 	}
 
@@ -469,12 +501,20 @@ void draw_ui_and_respond_input(struct state *st)
 	// center vertically relative to two adjacent buttons
 	int toggle_button_y_end = toggle_button_y + toggle_button_h;
 	int val_slider_y = ind_button_y + ((toggle_button_y_end-ind_button_y) - val_slider_h) / 2;
-	DrawRectangle(val_slider_x, val_slider_y+26*dpi, val_slider_w, 6*dpi, st->text_color);
-	int wf = st->which_fixed;
 	int val_slider_offset = roundf(val_slider_w * ( (float) st->fixed_value ));
-	Vector2 circle_center = { val_slider_x + val_slider_offset, val_slider_y+30*dpi };
-	DrawCircleV(circle_center, 15*dpi,
-			   (Color) { wf == 0 ? 218 : 0, wf == 1 ? 216 : 0,  wf == 2 ? 216 : 0, 255 });
+	{
+		DrawRectangle(val_slider_x, val_slider_y+26*dpi, val_slider_w, 6*dpi, st->text_color);
+		Vector2 circle_center = { val_slider_x + val_slider_offset, val_slider_y+30*dpi };
+		Color circle_color;
+		if (st->mode == 0) {
+			int wf = st->which_fixed;
+			circle_color = (Color) { wf == 0 ? 218 : 0, wf == 1 ? 216 : 0,  wf == 2 ? 216 : 0, 255 };
+		} else {
+			int a = st->text_color.r < 128 ?  112 : 192;
+			circle_color = (Color) { a, a, a, 255 };
+		}
+		DrawCircleV(circle_center, 15*dpi, circle_color);
+	}
 	if (st->cursor_state == CURSOR_START || st->val_slider_dragging) {
 		TraceLog(LOG_DEBUG, "Received click. dragging: %d", st->val_slider_dragging);
 		Vector2 pos = GetMousePosition();
@@ -563,7 +603,7 @@ int main(int argc, char *argv[])
 	st->screenHeight = 780;
 	st->mode = 0;
 	st->which_fixed = 2;
-	st->saved_fixed = 2;
+	st->saved_fixed = 0;
 	st->fixed_value = 0.0;
 	st->x_value = 0;
 	st->y_value = 0;
