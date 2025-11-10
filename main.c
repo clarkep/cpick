@@ -19,9 +19,7 @@ License: GPL-3.0 (see LICENSE)
 #include <raylib.h>
 #include <rlgl.h>
 
-#include "font/noto_sans_mono_small.h"
-#include "font/noto_sans_mono_medium.h"
-#include "font/noto_sans_mono_large.h"
+#include "font/noto_sans_mono_mini.h"
 
 #define MIN(x, y) ((x) <= (y) ? (x) : (y))
 #define MAX(x, y) ((x) > (y) ? (x) : (y))
@@ -601,12 +599,12 @@ void init_for_dpi(struct state *st, float dpi, float old_dpi)
 	}
 
 	// TODO: build font into executable
-	st->text_font_small = LoadFontEx("font/NotoSansMono-Regular.ttf", 22*dpi,
-		small_codepoints, sizeof(small_codepoints)/sizeof(int));
-	st->text_font_medium = LoadFontEx("font/NotoSansMono-Regular.ttf", 30*dpi, medium_codepoints,
-		sizeof(medium_codepoints)/sizeof(int));
-	st->text_font_large = LoadFontEx("font/NotoSansMono-Regular.ttf", 40*dpi, large_codepoints,
- 		sizeof(large_codepoints)/sizeof(int));
+	st->text_font_small = LoadFontFromMemory(".ttf", noto_sans_mono_mini_ttf, noto_sans_mono_mini_ttf_len,
+		22*dpi, small_codepoints, sizeof(small_codepoints)/sizeof(int));
+	st->text_font_medium = LoadFontFromMemory(".ttf", noto_sans_mono_mini_ttf, noto_sans_mono_mini_ttf_len,
+		30*dpi, medium_codepoints, sizeof(medium_codepoints)/sizeof(int));
+	st->text_font_large = LoadFontFromMemory(".ttf", noto_sans_mono_mini_ttf, noto_sans_mono_mini_ttf_len,
+		40*dpi, large_codepoints, sizeof(large_codepoints)/sizeof(int));
 
 	// Measure the label width once; since it's a monospace font, it will be the same for all colors.
 	st->medium_label_width = MeasureTextEx(st->text_font_medium, "r:255 g:255 b:255 hex:#ffffff",
