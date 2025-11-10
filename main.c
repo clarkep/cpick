@@ -17,6 +17,8 @@ License: GPL-3.0 (see LICENSE)
 #include <errno.h>
 #include <math.h> // round
 #include <raylib.h>
+#include <rlgl.h>
+
 #include "font/noto_sans_mono_small.h"
 #include "font/noto_sans_mono_medium.h"
 #include "font/noto_sans_mono_large.h"
@@ -53,6 +55,7 @@ struct state {
 	Font text_font_medium;
 	int medium_label_width;
 	Font text_font_large;
+	Shader hsv_grad_shader;
 	struct {
 		char *path;
 		unsigned long offset;
@@ -158,48 +161,63 @@ void draw_gradient_square_rgb(int x, int y, int size, int which_fixed, float fix
 	DrawRectangleGradientEx(rec, corner_cols[2], corner_cols[0], corner_cols[1], corner_cols[3]);
 }
 
-// TODO: Convert to shader.
-void draw_gradient_square_hsv(int x, int y, int size, int which_fixed, float fixed_val)
+char *hsv_grad_fragshader =
+"#version 330\n"
+"in vec2 fragTexCoord;\n"
+"in vec4 fragColor;\n"
+"vec3 hsv2rgb(vec3 c)\n"
+"{\n"
+"    vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);\n"
+"    vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);\n"
+"    return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);\n"
+"}"
+"void main()\n"
+"{\n"
+"	gl_FragColor = vec4(hsv2rgb(fragColor.xyz), 1.0);\n"
+"}\n";
+
+void draw_gradient_square_hsv(struct state *st, int x, int y, int size, int which_fixed,
+	float fixed_val)
 {
-	for (int yi=0; yi<size; yi++) {
-		for (int xi=0; xi<size; xi++) {
-			Color col;
-			if (which_fixed == 0) {
-				col = ColorFromHSV(fixed_val * 360.0f, xi / (float) size, yi / (float) size);
-				DrawPixel(x + xi, y + size - yi - 1, col);
-			} else if (which_fixed == 1) {
-				col = ColorFromHSV(xi * 360.0f / (float) size, fixed_val, yi / (float) size);
-				DrawPixel(x + xi, y + size - yi - 1, col);
+	Color corner_cols[4];
+	for (int i=0; i<2; i++) {
+		for (int j=0; j<2; j++) {
+			int c1 = j ? 255 : 0;
+			int c2 = i ? 255 : 0;
+			if (which_fixed == 0) { // hue
+				// The easiest way to write the fragment shader for raylib is to store the hsv
+				// values as if they are RGB colors, which means they have to be clipped to 0-255.
+				// But there are no visible changes compared to the more precise cpu only version.
+				corner_cols[i*2+j] =  (Color) { fixed_val*255.0, j*255.0, i*255.0, 255.0 };
+			} else if (which_fixed == 1) { // saturation
+				corner_cols[i*2+j] = (Color) { j*255.0, fixed_val*255.0, i*255.0, 255.0 };
 			}
 		}
 	}
+	Rectangle rec = { x, y, size, size };
+	BeginShaderMode(st->hsv_grad_shader);
+	DrawRectangleGradientEx(rec, corner_cols[2], corner_cols[0], corner_cols[1], corner_cols[3]);
+	EndShaderMode();
 }
 
-// TODO: Convert to shader.
 void draw_gradient_circle_and_axes(int x, int y, int r, float fixed_val, struct state *st)
 {
-	int cur_xmax = r;
-	for (int yi=0; yi<r; yi++) {
-		for (int xi=0; xi<cur_xmax; xi++) {
-			float ri = sqrtf((float) yi*yi + (float) xi*xi);
-			if (ri > r) {
-				cur_xmax = xi;
-				break;
-			}
-			float theta1 = (atan2f(yi, xi) / (2*PI))*360.0f;
-			float theta2 = 180.0f - theta1;
-			float theta3 = theta1 + 180.0f;
-			float theta4 = theta2 + 180.0f;
-			Color col1 = ColorFromHSV(theta1, ri/(float)r, fixed_val);
-			Color col2 = ColorFromHSV(theta2, ri/(float)r, fixed_val);
-			Color col3 = ColorFromHSV(theta3, ri/(float)r, fixed_val);
-			Color col4 = ColorFromHSV(theta4, ri/(float)r, fixed_val);
-			DrawPixel(x + xi, y - yi, col1);
-			DrawPixel(x - xi, y - yi, col2);
-			DrawPixel(x - xi, y + yi, col3);
-			DrawPixel(x + xi, y + yi, col4);
-		}
-	}
+	BeginShaderMode(st->hsv_grad_shader);
+    rlBegin(RL_TRIANGLES);
+        for (int i = 0; i < 255; i += 1)
+        {
+			float ang = (i / 255.0f) * 2 * PI;
+			float ang2 = ((i+1) / 255.0f) * 2 * PI;
+            rlColor4ub(i, 0, fixed_val*255.0f, 255);
+            rlVertex2f(x, y);
+            rlColor4ub(i, 255, fixed_val*255.0f, 255);
+            rlVertex2f(x + cosf(ang)*r, y - sinf(ang)*r);
+            rlColor4ub(i+1, 255, fixed_val*255.0f, 255);
+            rlVertex2f(x + cosf(ang2)*r, y - sinf(ang2)*r);
+        }
+    rlEnd();
+    EndShaderMode();
+	// tick marks
 	float dpi = st->dpi;
 	for (float ang=0.0f; ang<360.0f; ang+=30.0) {
 		float dx = cosf(ang*2*PI/360.0f);
@@ -234,6 +252,7 @@ void draw_gradient_circle_and_axes(int x, int y, int r, float fixed_val, struct 
 	Vector2 harr_end = { x + (r+harr_d+harr_w/2)*cosf(2*PI*harr_ang2/360.0f),
 		y - (r+harr_d+harr_w/2)*sinf(2*PI*harr_ang2/360.0f) };
 	float harr_dir_ang = (harr_ang2*2*PI / 360.0f) + PI / 2;
+	// arrowhead
 	float adj = 2*PI/120;
 	// xx angles are set up so that left arrowhead goes straight down, but still looks a bit janky
 		Vector2 h_ah_left = { harr_end.x /*+ah_len*cosf(harr_dir_ang+ah_ang+adj)*/,
@@ -343,15 +362,13 @@ void draw_ui_and_respond_input(struct state *st)
 			st->cursor_state = CURSOR_UP;
 	}
 
-
 	struct color_info ci = current_color(st);
 	Color cur_color = ci.rgb;
 	Vector3 cur_hsv = ci.hsv;
 	ClearBackground( cur_color );
 
 	float dpi = st->dpi;
-	// White is especially hard to read against greens and yellows, so count green extra when
-	// deciding text color.
+	// TODO: improve
 	if (cur_color.r*cur_color.r + cur_color.g*cur_color.g*1.6 + cur_color.b*cur_color.b > 97500) {
 		st->text_color = BLACK;
 	} else {
@@ -379,7 +396,7 @@ void draw_ui_and_respond_input(struct state *st)
 			square = false;
 			draw_gradient_circle_and_axes(cx, cy, cr, st->fixed_value, st);
 		} else {
-			draw_gradient_square_hsv(grad_square_x, grad_square_y, 512*dpi, st->which_fixed,
+			draw_gradient_square_hsv(st, grad_square_x, grad_square_y, 512*dpi, st->which_fixed,
 				st->fixed_value);
 			draw_axes(grad_square_x, grad_square_y, x_axis_h, y_axis_w, st);
 		}
@@ -469,10 +486,10 @@ void draw_ui_and_respond_input(struct state *st)
 	Color toggle_unselected_bg;
 	if (st->text_color.r < 128) { // black text
 		toggle_selected_bg = (Color) { 224, 224, 224, 255 };
-		toggle_unselected_bg = (Color) { 160, 160, 160, 255 };
+		toggle_unselected_bg = (Color) { 144, 144, 144, 255 };
 	} else { // white text
-		toggle_selected_bg = (Color) { 176, 176, 176, 255 };
-		toggle_unselected_bg = (Color) { 112, 112, 112, 255 };
+		toggle_selected_bg = (Color) { 160, 160, 160, 255 };
+		toggle_unselected_bg = (Color) { 80, 80, 80, 255 };
 	}
 	DrawRectangle(toggle_button_x, toggle_button_y, toggle_button_w/2, toggle_button_h,
 		st->mode ? toggle_unselected_bg : toggle_selected_bg);
@@ -607,6 +624,8 @@ int main(int argc, char *argv[])
 	st->fixed_value = 0.0;
 	st->x_value = 0;
 	st->y_value = 0;
+	st->square_dragging = false;
+	st->val_slider_dragging = false;
 	st->text_color = WHITE;
 	st->outfile.path = NULL;
 	st->outfile.offset = 0;
@@ -645,6 +664,7 @@ int main(int argc, char *argv[])
 	SetConfigFlags(FLAG_WINDOW_RESIZABLE);
 	SetTraceLogLevel(LOG_WARNING);
 	InitWindow(st->screenWidth, st->screenHeight, "Cpick");
+	st->hsv_grad_shader = LoadShaderFromMemory(NULL, hsv_grad_fragshader);
 
 	st->dpi = GetWindowScaleDPI().x;
 	init_for_dpi(st, st->dpi, 1);
