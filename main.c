@@ -66,6 +66,14 @@ struct state {
 
 char *color_strings[2][3] = { "R", "G", "B", "H", "S", "V" };
 
+void errexit(char *fmt, ...) {
+	va_list args;
+	va_start(args, fmt);
+	vfprintf(stderr, fmt, args);
+	va_end(args);
+	exit(1);
+}
+
 void myassert(bool p, char *fmt, ...) {
 	if (!p) {
 		va_list args;
@@ -572,10 +580,11 @@ void draw_ui_and_respond_input(struct state *st)
 	}
 }
 
-void assert_usage(bool p)
-{
-	myassert(p, "usage: cpick [file.txt:offset]\n");
-}
+char *usage_str =
+"cpick [file@offset]\n"
+"Options:\n"
+"  --file FILE     choose a file to output to; alternative to file@offset\n"
+"  --offset N      choose an offset in FILE; alternative to file@offset\n";
 
 // A bug in raylib's font atlas generation code causes LoadFontEx to fail to load 'B' if the only
 // chars are 'R', 'G', and 'B' when setting up text_font_large. A workaround for now is to add
@@ -598,7 +607,6 @@ void init_for_dpi(struct state *st, float dpi, float old_dpi)
 		st->screenHeight = GetScreenHeight();
 	}
 
-	// TODO: build font into executable
 	st->text_font_small = LoadFontFromMemory(".ttf", noto_sans_mono_mini_ttf, noto_sans_mono_mini_ttf_len,
 		22*dpi, small_codepoints, sizeof(small_codepoints)/sizeof(int));
 	st->text_font_medium = LoadFontFromMemory(".ttf", noto_sans_mono_mini_ttf, noto_sans_mono_mini_ttf_len,
@@ -634,23 +642,32 @@ int main(int argc, char *argv[])
 
 	for (int i=1; i<argc; i++) {
 		char *arg = argv[i];
-		if (argv[i][0] == '-') {
-			if (argv[i][1] == '-') {
-
-			} else {
-
+		if (argv[i][0] == '-' && argv[i][1] == '-') {
+			char *longarg = &argv[i][2];
+			if (strcmp(longarg, "file")==0) {
+				myassert(i+1<argc && !st->outfile.path, usage_str);
+				st->outfile.path = argv[i+1];
+				i++;
+			} else if (strcmp(longarg, "offset")==0) {
+				myassert(i+1<argc && !st->outfile.offset, usage_str);
+				errno = 0;
+				st->outfile.offset = strtoul(argv[i+1], NULL, 10);
+				myassert(!errno, usage_str);
+				i++;
 			}
+		} else if (argv[i][0] == '-') {
+			errexit(usage_str);
 		} else {
-			assert_usage(!st->outfile.path);
-			char *sep = strchr(arg, ':');
-			assert_usage(sep);
+			myassert(!st->outfile.path, usage_str);
+			char *sep = strchr(arg, '@');
+			myassert(sep, usage_str);
 			int path_len = sep - arg;
 			st->outfile.path = malloc(path_len+1);
 			memcpy(st->outfile.path, arg, path_len);
 			st->outfile.path[path_len] = '\0';
 			errno = 0;
 			st->outfile.offset = strtoul(sep+1, NULL, 10);
-			assert_usage(!errno);
+			myassert(!errno, usage_str);
 			i++;
 		}
 	}
@@ -667,13 +684,6 @@ int main(int argc, char *argv[])
 	st->dpi = GetWindowScaleDPI().x;
 	init_for_dpi(st, st->dpi, 1);
 
-	// Load directly from ttf file(one time)
-	/*
-	st->text_font_small = LoadFont_NotoSansMonoSmall();
-	st->text_font_medium = LoadFont_NotoSansMonoMedium();
-	st->text_font_large = LoadFont_NotoSansMonoLarge();
-	*/
-
 	SetTargetFPS(60);
 	while (!WindowShouldClose())
 	{
@@ -688,12 +698,5 @@ int main(int argc, char *argv[])
 		EndDrawing();
     }
 
-    /*
-    // Export fonts(one time)
-	ExportFontAsCode(st->text_font_small, "font/noto_sans_mono_small.h");
-	ExportFontAsCode(st->text_font_medium, "font/noto_sans_mono_medium.h");
-	ExportFontAsCode(st->text_font_large, "font/noto_sans_mono_large.h");
-	CloseWindow();
-	*/
 	return 0;
 }
