@@ -487,7 +487,6 @@ void draw_ui_and_respond_input(struct state *st)
 	int ind_tabs_y = ind_button_y + ind_button_h - ind_tabs_h - 1;
 	// main button
 	static float ind_button_hover_v = 0;
-	static float tabs_active_v[3];
 	Color hl_color = { 255, 255, 0, 255 };
 	float anim_vdt = .3;
 	float hov_bright = .4;
@@ -503,17 +502,19 @@ void draw_ui_and_respond_input(struct state *st)
 			new_fixed = (st->which_fixed + 1) % 3;
 			ind_button_hover_v = 0;
 		}
-		// if (st->cursor_state != CURSOR_DOWN) {
-		//	ind_button_hover_v = MIN(ind_button_hover_v + anim_vdt, 1.0);
+		if (st->cursor_state != CURSOR_DOWN) {
+			ind_button_hover_v = MIN(ind_button_hover_v + anim_vdt, 1.0);
+		}
 	} else {
 		ind_button_hover_v = MAX(ind_button_hover_v - anim_vdt, 0.0);
 	}
 	// tabs
 	static float tabs_hover_v[3];
+	static float tabs_active_v[3];
 	float tabs_active_target[3] = { 0.0, 0.0, 0.0 };
 	float tabs_hover_target[3] = { 0.0, 0.0, 0.0 };
-	tabs_active_target[st->which_fixed] = 1.0;
 	static bool tabs_active_v_initialized = false;
+	tabs_active_target[st->which_fixed] = 1.0;
 	/*
 	if (!tabs_active_v_initialized) {
 		tabs_active_v[st->which_fixed] = 1.0;
