@@ -3,7 +3,7 @@ cpick: a color picker
 
 By: Paul Clarke
 Created: 4/10/2024
-License: GPL-3.0 (see LICENSE)
+License: GPL3(see LICENSE)
 */
 
 #ifdef _WIN32
@@ -82,6 +82,14 @@ void myassert(bool p, char *fmt, ...) {
 		vfprintf(stderr, fmt, args);
 		va_end(args);
 		exit(1);
+	}
+}
+
+void value_creep_towards(float *val, float target, float amount) {
+	if (*val < target) {
+		*val = MIN(*val + amount, target);
+	} else if (*val > target) {
+		*val = MAX(*val - amount, target);
 	}
 }
 
@@ -470,7 +478,7 @@ void draw_ui_and_respond_input(struct state *st)
 		}
 	}
 
-	// fixed color button
+	// fixed color buttons
 	int ind_button_x = grad_square_x;
 	int ind_button_y = grad_square_y_end + x_axis_h + 10*dpi;
 	int ind_button_w = 70*dpi;
@@ -478,17 +486,45 @@ void draw_ui_and_respond_input(struct state *st)
 	int ind_tabs_h = 5*dpi;
 	int ind_tabs_y = ind_button_y + ind_button_h - ind_tabs_h - 1;
 	// main button
-	static float hover_t = 0;
-	DrawRectangle(ind_button_x, ind_button_y, ind_button_w, ind_button_h, fixed_indication_color);
+	static float ind_button_hover_v = 0;
+	static float tabs_active_v[3];
+	Color hl_color = { 255, 255, 0, 255 };
+	float anim_vdt = .3;
+	float hov_bright = .4;
+	Color fixed_button_color = ColorBrightness(fixed_indication_color, ind_button_hover_v * hov_bright);
+	DrawRectangle(ind_button_x, ind_button_y, ind_button_w, ind_button_h, fixed_button_color);
 	DrawRectangleLines(ind_button_x, ind_button_y, ind_button_w, ind_button_h, st->text_color);
 	DrawTextEx(st->text_font_large, color_strings[st->mode][st->which_fixed],
 		(Vector2) {ind_button_x+23*dpi, ind_button_y+15*dpi}, 40.*dpi, 2*dpi, st->text_color);
-	// select tabs
+	Vector2 pos = GetMousePosition();
+	int new_fixed = -1;
+	if (CheckCollisionPointRec(pos, (Rectangle) { ind_button_x, ind_button_y, ind_button_w, ind_tabs_y-ind_button_y})) {
+		if (st->cursor_state == CURSOR_START) {
+			new_fixed = (st->which_fixed + 1) % 3;
+			ind_button_hover_v = 0;
+		}
+		// if (st->cursor_state != CURSOR_DOWN) {
+		//	ind_button_hover_v = MIN(ind_button_hover_v + anim_vdt, 1.0);
+	} else {
+		ind_button_hover_v = MAX(ind_button_hover_v - anim_vdt, 0.0);
+	}
+	// tabs
+	static float tabs_hover_v[3];
+	float tabs_active_target[3] = { 0.0, 0.0, 0.0 };
+	float tabs_hover_target[3] = { 0.0, 0.0, 0.0 };
+	tabs_active_target[st->which_fixed] = 1.0;
+	static bool tabs_active_v_initialized = false;
+	/*
+	if (!tabs_active_v_initialized) {
+		tabs_active_v[st->which_fixed] = 1.0;
+		tabs_active_v_initialized = true;
+	}
+	*/
 	Color color1, color2, color3;
 	if (!st->mode) {
-		color1 = st->which_fixed == 0 ? GetColor(0xc00000ff) : GetColor(0xc00000ff);
-		color2 = st->which_fixed == 1 ? GetColor(0x00c000ff) : GetColor(0x00c000ff);
-		color3 = st->which_fixed == 2 ? GetColor(0x0050ffff) : GetColor(0x0050ffff);
+		color1 = st->which_fixed == 0 ? GetColor(0xf00000ff) : GetColor(0xc00000ff);
+		color2 = st->which_fixed == 1 ? GetColor(0x00f000ff) : GetColor(0x00c000ff);
+		color3 = st->which_fixed == 2 ? GetColor(0x00a0ffff) : GetColor(0x0050ffff);
 	} else {
 		int a = st->text_color.r < 128 ? dark_text_bright_grey_bg : light_text_bright_grey_bg;
 		int b = st->text_color.r < 128 ? dark_text_dim_grey_bg : light_text_dim_grey_bg;
@@ -498,22 +534,39 @@ void draw_ui_and_respond_input(struct state *st)
 		color2 = st->which_fixed == 1 ? bright : dim;
 		color3 = st->which_fixed == 2 ? bright : dim;
 	}
-	DrawRectangle(ind_button_x, ind_tabs_y, ind_button_w/3, ind_tabs_h, color1);
-	DrawRectangle(ind_button_x+ind_button_w/3, ind_tabs_y, ind_button_w/3, ind_tabs_h, color2);
-	DrawRectangle(ind_button_x+2*ind_button_w/3, ind_tabs_y, ind_button_w/3, ind_tabs_h, color3);
+	/*
+	color1 = ColorBrightness(color1, tabs_hover_v[0]*hov_bright);
+	color2 = ColorBrightness(color2, tabs_hover_v[1]*hov_bright);
+	color3 = ColorBrightness(color3, tabs_hover_v[2]*hov_bright);
+	*/
+	float hb[3]; // tab height boosts
+	for (int tab_i=0; tab_i<3; tab_i++) {
+		hb[tab_i] = 1.0 * dpi * tabs_hover_v[tab_i];
+	}
+	DrawRectangle(ind_button_x, ind_tabs_y-hb[0], ind_button_w/3, ind_tabs_h+hb[0], color1);
+	DrawRectangleLines(ind_button_x, ind_tabs_y-hb[0], ind_button_w/3, ind_tabs_h+1+hb[0], st->text_color);
+	DrawRectangle(ind_button_x+ind_button_w/3, ind_tabs_y-hb[1], ind_button_w/3, ind_tabs_h+hb[1], color2);
+	DrawRectangleLines(ind_button_x+ind_button_w/3, ind_tabs_y-hb[1], ind_button_w/3, ind_tabs_h+1+hb[1], st->text_color);
+	DrawRectangle(ind_button_x+2*ind_button_w/3, ind_tabs_y-hb[2], ind_button_w/3, ind_tabs_h+hb[2], color3);
+	DrawRectangleLines(ind_button_x+2*ind_button_w/3, ind_tabs_y-hb[2], ind_button_w/3, ind_tabs_h+1+hb[2], st->text_color);
 	// DrawRectangleLines(ind_button_x, ind_tabs_y, ind_button_w, ind_tabs_h, st->text_color);
-	if (st->cursor_state == CURSOR_START) {
-		Vector2 pos = GetMousePosition();
-		int new_fixed = -1;
-		if (CheckCollisionPointRec(pos, (Rectangle) { ind_button_x, ind_button_y, ind_button_w, ind_tabs_y-ind_button_y})) {
-			new_fixed = (st->which_fixed + 1) % 3;
-		} else if (CheckCollisionPointRec(pos, (Rectangle) { ind_button_x, ind_tabs_y, ind_button_w, ind_tabs_h})) {
-			new_fixed = (pos.x - ind_button_x) / (ind_button_w / 3);
+	if (CheckCollisionPointRec(pos, (Rectangle) { ind_button_x, ind_tabs_y, ind_button_w, ind_tabs_h})) {
+		int tab_i = (pos.x - ind_button_x) / (ind_button_w / 3.0);
+		if (st->cursor_state == CURSOR_START && tab_i != st->which_fixed) {
+			new_fixed = tab_i;
+			// slam to zero instead of setting target
+			tabs_hover_v[tab_i] = 0.0;
 		}
-		if (new_fixed >= 0) {
-			st->which_fixed = new_fixed;
-			switch_into_mode(st, st->mode, st->which_fixed, ci);
-		}
+		tabs_hover_target[tab_i] = 1.0;
+		tabs_active_target[tab_i] = 1.0;
+	}
+	for (int tab_i=0; tab_i<3; tab_i++) {
+		value_creep_towards(&tabs_hover_v[tab_i], tabs_hover_target[tab_i], anim_vdt);
+		value_creep_towards(&tabs_active_v[tab_i], tabs_active_target[tab_i], anim_vdt);
+	}
+	if (new_fixed >= 0) {
+		st->which_fixed = new_fixed;
+		switch_into_mode(st, st->mode, st->which_fixed, ci);
 	}
 
 	// hsv-rgb toggle
@@ -534,28 +587,33 @@ void draw_ui_and_respond_input(struct state *st)
 		toggle_selected_bg = (Color) { a, a, a, 255 };
 		toggle_unselected_bg = (Color) { b, b, b, 255 };
 	}
+	static float toggle_unselected_hover_v = 0;
+	Color toggle_unselected_bg_mod = ColorBrightness(toggle_unselected_bg,
+		toggle_unselected_hover_v*0.15);
 	DrawRectangle(toggle_button_x, toggle_button_y, toggle_button_w/2, toggle_button_h,
-		st->mode ? toggle_unselected_bg : toggle_selected_bg);
+		st->mode ? toggle_unselected_bg_mod : toggle_selected_bg);
 	DrawRectangle(toggle_button_x + toggle_button_w/2, toggle_button_y, toggle_button_w/2,
-		toggle_button_h, st->mode ? toggle_selected_bg : toggle_unselected_bg);
+		toggle_button_h, st->mode ? toggle_selected_bg : toggle_unselected_bg_mod);
 	DrawRectangleLines(toggle_button_x, toggle_button_y, toggle_button_w, toggle_button_h,
 		st->text_color);
 	DrawTextEx(st->text_font_small, "RGB", (Vector2) { toggle_button_x+4*dpi,
 		toggle_button_y-1*dpi }, 22*dpi, 0*dpi, st->text_color);
 	DrawTextEx(st->text_font_small, "HSV", (Vector2) { toggle_button_x+toggle_button_w/2+4*dpi,
 		toggle_button_y-1*dpi }, 22*dpi, 0*dpi, st->text_color);
-	if (st->cursor_state == CURSOR_START) {
-		Vector2 pos = GetMousePosition();
-		Rectangle cur_rect;
-		cur_rect = (Rectangle) { toggle_button_x + (st->mode ? 0 : toggle_button_w/2), toggle_button_y,
-			toggle_button_w/2, toggle_button_h };
-		if (CheckCollisionPointRec(pos, cur_rect)) {
+	Rectangle cur_rect;
+	cur_rect = (Rectangle) { toggle_button_x + (st->mode ? 0 : toggle_button_w/2), toggle_button_y,
+		toggle_button_w/2, toggle_button_h };
+	if (CheckCollisionPointRec(pos, cur_rect)) {
+		toggle_unselected_hover_v = MIN(toggle_unselected_hover_v + anim_vdt, 1.0);
+		if (st->cursor_state == CURSOR_START) {
 			int tmp = st->which_fixed;
 			st->which_fixed = st->saved_fixed;
 			st->saved_fixed = tmp;
 			st->mode = (st->mode + 1) % 2;
 			switch_into_mode(st, st->mode, st->which_fixed, ci);
 		}
+	} else {
+		toggle_unselected_hover_v = MAX(toggle_unselected_hover_v - anim_vdt, 0.0);
 	}
 
 	// fixed value slider
