@@ -3,7 +3,7 @@ cpick: a color picker
 
 By: Paul Clarke
 Created: 4/10/2024
-License: GPL3(see LICENSE)
+License: GPL 3(see LICENSE)
 */
 
 #ifdef _WIN32
@@ -482,9 +482,10 @@ void draw_ui_and_respond_input(struct state *st)
 	int ind_button_x = grad_square_x;
 	int ind_button_y = grad_square_y_end + x_axis_h + 10*dpi;
 	int ind_button_w = 70*dpi;
-	int ind_button_h = 70*dpi;
-	int ind_tabs_h = 5*dpi;
-	int ind_tabs_y = ind_button_y + ind_button_h - ind_tabs_h - 1;
+	int ind_button_h = 64*dpi;
+	int ind_tabs_h = 9*dpi;
+	// int ind_tabs_y = ind_button_y + ind_button_h - ind_tabs_h - 1;
+	int ind_tabs_y = ind_button_y + ind_button_h;
 	// main button
 	static float ind_button_hover_v = 0;
 	Color hl_color = { 255, 255, 0, 255 };
@@ -521,7 +522,7 @@ void draw_ui_and_respond_input(struct state *st)
 		tabs_active_v_initialized = true;
 	}
 	*/
-	Color color1, color2, color3;
+	Color color1, color2, color3; // tab colors
 	if (!st->mode) {
 		color1 = st->which_fixed == 0 ? GetColor(0xf00000ff) : GetColor(0xc00000ff);
 		color2 = st->which_fixed == 1 ? GetColor(0x00f000ff) : GetColor(0x00c000ff);
@@ -535,23 +536,26 @@ void draw_ui_and_respond_input(struct state *st)
 		color2 = st->which_fixed == 1 ? bright : dim;
 		color3 = st->which_fixed == 2 ? bright : dim;
 	}
-	/*
 	color1 = ColorBrightness(color1, tabs_hover_v[0]*hov_bright);
 	color2 = ColorBrightness(color2, tabs_hover_v[1]*hov_bright);
 	color3 = ColorBrightness(color3, tabs_hover_v[2]*hov_bright);
-	*/
+	// XX I don't like this height boost effect, but it might look nice with some tweaking(maybe
+	// animating the widths as well). So just zero it for now.
+	int max_boost = 0.0 * dpi;;
 	float hb[3]; // tab height boosts
 	for (int tab_i=0; tab_i<3; tab_i++) {
-		hb[tab_i] = 1.0 * dpi * tabs_hover_v[tab_i];
+		hb[tab_i] = max_boost * tabs_hover_v[tab_i];
 	}
+	// XX why is the +1 on the heights necessary?
 	DrawRectangle(ind_button_x, ind_tabs_y-hb[0], ind_button_w/3, ind_tabs_h+hb[0], color1);
 	DrawRectangleLines(ind_button_x, ind_tabs_y-hb[0], ind_button_w/3, ind_tabs_h+1+hb[0], st->text_color);
 	DrawRectangle(ind_button_x+ind_button_w/3, ind_tabs_y-hb[1], ind_button_w/3, ind_tabs_h+hb[1], color2);
 	DrawRectangleLines(ind_button_x+ind_button_w/3, ind_tabs_y-hb[1], ind_button_w/3, ind_tabs_h+1+hb[1], st->text_color);
-	DrawRectangle(ind_button_x+2*ind_button_w/3, ind_tabs_y-hb[2], ind_button_w/3, ind_tabs_h+hb[2], color3);
-	DrawRectangleLines(ind_button_x+2*ind_button_w/3, ind_tabs_y-hb[2], ind_button_w/3, ind_tabs_h+1+hb[2], st->text_color);
+	// XX and here, the +1 on the widths
+	DrawRectangle(ind_button_x+2*ind_button_w/3, ind_tabs_y-hb[2], ind_button_w/3+1, ind_tabs_h+hb[2], color3);
+	DrawRectangleLines(ind_button_x+2*ind_button_w/3, ind_tabs_y-hb[2], ind_button_w/3+1, ind_tabs_h+1+hb[2], st->text_color);
 	// DrawRectangleLines(ind_button_x, ind_tabs_y, ind_button_w, ind_tabs_h, st->text_color);
-	if (CheckCollisionPointRec(pos, (Rectangle) { ind_button_x, ind_tabs_y, ind_button_w, ind_tabs_h})) {
+	if (CheckCollisionPointRec(pos, (Rectangle) { ind_button_x, ind_tabs_y-max_boost, ind_button_w, ind_tabs_h+max_boost})) {
 		int tab_i = (pos.x - ind_button_x) / (ind_button_w / 3.0);
 		if (st->cursor_state == CURSOR_START && tab_i != st->which_fixed) {
 			new_fixed = tab_i;
@@ -572,7 +576,7 @@ void draw_ui_and_respond_input(struct state *st)
 
 	// hsv-rgb toggle
 	int toggle_button_x = ind_button_x;
-	int toggle_button_y = ind_button_y + ind_button_h + 3*dpi;
+	int toggle_button_y = ind_tabs_y + ind_tabs_h + 5*dpi;
 	int toggle_button_w = ind_button_w;
 	int toggle_button_h = 20*dpi;
 	Color toggle_selected_bg;
@@ -618,7 +622,7 @@ void draw_ui_and_respond_input(struct state *st)
 	}
 
 	// fixed value slider
-	int val_slider_x = ind_button_x + ind_button_h + 20*dpi;
+	int val_slider_x = ind_button_x + ind_button_w + 20*dpi;
 	int val_slider_w = grad_square_x_end - val_slider_x;
 	int val_slider_h = 60*dpi;
 	// center vertically relative to two adjacent buttons
