@@ -461,6 +461,8 @@ void draw_ui_and_respond_input(struct state *st)
 		} else if (st->cursor_state == CURSOR_STOP)
 			st->cursor_state = CURSOR_UP;
 	}
+	Vector2 pos = GetMousePosition();
+	float anim_vdt = .3;
 
 	struct color_info ci = current_color(st);
 	Color cur_color = ci.rgb;
@@ -480,13 +482,17 @@ void draw_ui_and_respond_input(struct state *st)
 	int light_text_bright_grey_bg = 160;
 	int light_text_dim_grey_bg = 80;
 	Color fixed_indication_color;
+	Color light_text_indication_color;
 	if (st->mode == 0) {
 		int wf = st->which_fixed;
 		int rgb_fixed_ind[] = { 0xc00000ff, 0x00c000ff, 0x0080ffff };
 		fixed_indication_color = GetColor(rgb_fixed_ind[wf]);
+		light_text_indication_color = fixed_indication_color;
 	} else {
 		int a = st->text_color.r < 128 ? dark_text_bright_grey_bg : light_text_bright_grey_bg;
+		int b = light_text_bright_grey_bg;
 		fixed_indication_color = (Color) { a, a, a, 255 };
+		light_text_indication_color = (Color) { b, b, b, 255 };
 	}
 
 	// gradient
@@ -563,23 +569,25 @@ void draw_ui_and_respond_input(struct state *st)
 	}
 
 	// fixed color buttons
-	int ind_button_x = grad_square_x;
-	int ind_button_y = grad_square_y_end + x_axis_h + 10*dpi;
-	int ind_button_w = 70*dpi;
-	int ind_button_h = 0*dpi;
-	int ind_tabs_h = 30*dpi;
+	int top_tabs_x = grad_square_x;
+	int top_tabs_y = grad_square_y_end + x_axis_h + 10*dpi;
+	int top_tabs_h = 20*dpi;
+	int top_tabs_w = 70*dpi;
+	int ind_button_x = top_tabs_x;
+	int ind_button_y = top_tabs_y + top_tabs_h;
+	int ind_button_w = top_tabs_w;
+	int ind_button_h = 60*dpi;
 	// int ind_tabs_y = ind_button_y + ind_button_h - ind_tabs_h - 1;
 	int ind_tabs_y = ind_button_y + ind_button_h;
+	Color ind_border_color = GetColor(0xa0a0a0ff);
 	// main button
-	/*
 	static float ind_button_hover_v = 0;
-	Color hl_color = { 255, 255, 0, 255 };
 	float hov_bright = .4;
-	Color fixed_button_color = ColorBrightness(fixed_indication_color, ind_button_hover_v * hov_bright);
+	Color fixed_button_color = ColorBrightness(light_text_indication_color, ind_button_hover_v * hov_bright);
 	DrawRectangle(ind_button_x, ind_button_y, ind_button_w, ind_button_h, fixed_button_color);
-	DrawRectangleLines(ind_button_x, ind_button_y, ind_button_w, ind_button_h, st->text_color);
+	DrawRectangleLines(ind_button_x, ind_button_y, ind_button_w, ind_button_h, ind_border_color);
 	DrawTextEx(st->text_font_large, color_strings[st->mode][st->which_fixed],
-		(Vector2) {ind_button_x+23*dpi, ind_button_y+(ind_button_h-40.0f*dpi)/2.0f}, 40.*dpi, 2*dpi, st->text_color);
+		(Vector2) {ind_button_x+23*dpi, ind_button_y+(ind_button_h-40.0f*dpi)/2.0f}, 40.*dpi, 2*dpi, WHITE);
 	if (CheckCollisionPointRec(pos, (Rectangle) { ind_button_x, ind_button_y, ind_button_w, ind_tabs_y-ind_button_y})) {
 		if (st->cursor_state == CURSOR_START) {
 			st->which_fixed = (st->which_fixed + 1) % 3;
@@ -592,9 +600,6 @@ void draw_ui_and_respond_input(struct state *st)
 	} else {
 		ind_button_hover_v = MAX(ind_button_hover_v - anim_vdt, 0.0);
 	}
-	*/
-	Vector2 pos = GetMousePosition();
-	float anim_vdt = .3;
 	// tabs
 	Color color1, color2, color3; // tab colors
 	static Tab_Select rgb_select;
@@ -634,7 +639,7 @@ void draw_ui_and_respond_input(struct state *st)
 		hsv_select.st = st;
 		first_frame_setup_done = true;
 	}
-	rgb_select.border_color = GetColor(0xa0a0a0ff);
+	rgb_select.border_color = ind_border_color;
 	hsv_select.border_color = rgb_select.border_color;
 	if (!st->mode) {
 		rgb_select.sel_i = st->which_fixed;
@@ -643,19 +648,19 @@ void draw_ui_and_respond_input(struct state *st)
 		rgb_select.sel_i = -1;
 		hsv_select.sel_i = st->which_fixed;
 	}
-	rgb_select.x = ind_button_x;
-	rgb_select.y = ind_tabs_y;
-	rgb_select.w = ind_button_w;
-	rgb_select.h = ind_tabs_h;
+	rgb_select.x = top_tabs_x;
+	rgb_select.y = top_tabs_y;
+	rgb_select.w = top_tabs_w;
+	rgb_select.h = top_tabs_h;
 	if (tab_select(&rgb_select, pos, st->cursor_state)) {
 		st->mode = 0;
 		st->which_fixed = rgb_select.sel_i;
 		switch_into_mode(st, st->mode, st->which_fixed, ci);
 	}
 	hsv_select.x = ind_button_x;
-	hsv_select.y = ind_tabs_y + ind_tabs_h;
+	hsv_select.y = ind_button_y + ind_button_h;
 	hsv_select.w = ind_button_w;
-	hsv_select.h = ind_tabs_h;
+	hsv_select.h = top_tabs_h;
 	if (tab_select(&hsv_select, pos, st->cursor_state)) {
 		st->mode = 1;
 		st->which_fixed = hsv_select.sel_i;
@@ -664,28 +669,30 @@ void draw_ui_and_respond_input(struct state *st)
 
 	// hsv-rgb toggle
 	int toggle_button_x = ind_button_x;
-	int toggle_button_y = ind_tabs_y + ind_tabs_h;
+	int toggle_button_y = hsv_select.y + hsv_select.h;
 	int toggle_button_w = ind_button_w;
 	int toggle_button_h = 20*dpi;
 
 	// fixed value slider
 	int val_slider_x = ind_button_x + ind_button_w + 20*dpi;
+	int val_slider_y = ind_button_y + ind_button_h / 2.0f;
 	int val_slider_w = grad_square_x_end - val_slider_x;
 	int val_slider_h = 60*dpi;
 	// center vertically relative to two adjacent buttons
 	int toggle_button_y_end = toggle_button_y + toggle_button_h;
-	int val_slider_y = ind_button_y + ((toggle_button_y_end-ind_button_y) - val_slider_h) / 2;
 	int val_slider_offset = roundf(val_slider_w * ( (float) st->fixed_value ));
 	{
-		DrawRectangle(val_slider_x, val_slider_y+26*dpi, val_slider_w, 6*dpi, st->text_color);
-		Vector2 circle_center = { val_slider_x + val_slider_offset, val_slider_y+30*dpi };
+		int bar_h = 8*dpi;
+		int circle_r = 15*dpi;
+		DrawRectangle(val_slider_x, val_slider_y-bar_h/2.0f, val_slider_w, 6*dpi, st->text_color);
+		Vector2 circle_center = { val_slider_x + val_slider_offset, val_slider_y };
 		DrawCircleV(circle_center, 15*dpi, fixed_indication_color);
 	}
 	if (st->cursor_state == CURSOR_START || st->val_slider_dragging) {
 		TraceLog(LOG_DEBUG, "Received click. dragging: %d", st->val_slider_dragging);
 		Vector2 pos = GetMousePosition();
 		if (!st->val_slider_dragging && CheckCollisionPointRec(pos,
-			(Rectangle) { val_slider_x, val_slider_y, val_slider_w, val_slider_h } )) {
+			(Rectangle) { val_slider_x, val_slider_y-val_slider_h/2.0f, val_slider_w, val_slider_h } )) {
 			st->val_slider_dragging = true;
 		}
 		if (st->val_slider_dragging) {
