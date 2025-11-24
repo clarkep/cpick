@@ -24,6 +24,7 @@ License: GPL 3(see LICENSE)
 
 #define MIN(x, y) ((x) <= (y) ? (x) : (y))
 #define MAX(x, y) ((x) > (y) ? (x) : (y))
+#define CLAMP(x, min, max) ((x) < (min) ? (min) : ((x) > (max) ? (max) : (x)))
 
 #define WRITE_INTERVAL 1.0
 
@@ -52,10 +53,12 @@ typedef struct state {
 	Color text_color;
 	Font text_font_small;
 	// xx variable width fonts...
-	int small_char_width;
 	Font text_font_medium;
-	int medium_label_width;
 	Font text_font_large;
+	int small_char_width;
+	int medium_char_width;
+	int large_char_width;
+	int medium_label_width;
 	Shader hsv_grad_shader;
 	struct {
 		char *path;
@@ -82,10 +85,30 @@ typedef struct tab_select
 	int y;
 	int w;
 	int h;
+	// internal state:
 	int sel_i;
 	float hover_v[3];
 	float active_v[3];
 } Tab_Select;
+
+typedef struct number_select {
+	char *fmt;
+	int min;
+	int max;
+	State *st;
+	float anim_vdt;
+	int x;
+	int y;
+	int drag_pixels_per_value;
+	// "internal" state:
+	int w;
+	int h;
+	int value;
+	bool dragging;
+	int drag_start_value;
+	int drag_start_y;
+	float hover_v;
+} Number_Select;
 
 char *color_strings[2][3] = { "R", "G", "B", "H", "S", "V" };
 
@@ -345,7 +368,7 @@ void draw_axes(int x, int y, int w, int h, struct state *st)
 	}
 }
 
-void switch_into_mode(struct state *st, int mode, int fixed, struct color_info ci)
+void update_color_or_mode(struct state *st, int mode, int fixed, struct color_info ci)
 {
 	Color cur_color = ci.rgb;
 	Vector3 cur_hsv = ci.hsv;
@@ -444,6 +467,49 @@ bool tab_select(Tab_Select *self, Vector2 pos, enum cursor_state cs)
 	}
 
 	return updated;
+}
+
+bool number_select(Number_Select *self, Vector2 pos, enum cursor_state cs)
+{
+	State *st = self->st;
+	float dpi = st->dpi;
+	char text[20];
+	int n_chars = snprintf(text, 20, self->fmt, self->value);
+	/*
+	// if changing font, may need to measure.
+	self->w = (st->medium_char_width + 1.5*dpi) * n_chars;
+	self->h = 30*dpi;
+	*/
+	Color hl_color = { 192, 192, 192, 128 * self->hover_v };
+	DrawRectangleRounded((Rectangle) { self->x - 10*dpi, self->y, self->w, self->h }, 0.5f, 30, hl_color);
+	DrawTextEx(st->text_font_medium, text, (Vector2) { self->x, self->y }, 30*dpi, 1.5*dpi,
+		st->text_color);
+	if (CheckCollisionPointRec(pos, (Rectangle) { self->x, self->y, self->w, self->h })) {
+		if (self->dragging || !(cs == CURSOR_DOWN)) {
+			self->hover_v = MIN(self->hover_v + self->anim_vdt, 1.0f);
+		}
+		if (cs == CURSOR_START) {
+			self->dragging = true;
+			self->drag_start_y = pos.y;
+			self->drag_start_value = self->value;
+		}
+	} else if (!self->dragging) {
+		self->hover_v = MAX(self->hover_v - self->anim_vdt, 0.0f);
+	}
+	if (cs == CURSOR_STOP) {
+		self->dragging = false;
+	}
+	int new_value = self->value;
+	if (self->dragging) {
+		new_value = self->drag_start_value + -(pos.y - self->drag_start_y) / (self->drag_pixels_per_value);
+		new_value = CLAMP(new_value, self->min, self->max);
+	}
+	if (new_value != self->value) {
+		self->value = new_value;
+		return true;
+	} else {
+		return false;
+	}
 }
 
 void draw_ui_and_respond_input(struct state *st)
@@ -570,7 +636,7 @@ void draw_ui_and_respond_input(struct state *st)
 
 	// fixed color buttons
 	int top_tabs_x = grad_square_x;
-	int top_tabs_y = grad_square_y_end + x_axis_h + 10*dpi;
+	int top_tabs_y = grad_square_y_end + x_axis_h + 12*dpi;
 	int top_tabs_h = 20*dpi;
 	int top_tabs_w = 70*dpi;
 	int ind_button_x = top_tabs_x;
@@ -579,7 +645,7 @@ void draw_ui_and_respond_input(struct state *st)
 	int ind_button_h = 60*dpi;
 	// int ind_tabs_y = ind_button_y + ind_button_h - ind_tabs_h - 1;
 	int ind_tabs_y = ind_button_y + ind_button_h;
-	Color ind_border_color = GetColor(0xa0a0a0ff);
+	Color ind_border_color = GetColor(0xb0b0b0ff);
 	// main button
 	static float ind_button_hover_v = 0;
 	float hov_bright = .4;
@@ -587,11 +653,13 @@ void draw_ui_and_respond_input(struct state *st)
 	DrawRectangle(ind_button_x, ind_button_y, ind_button_w, ind_button_h, fixed_button_color);
 	DrawRectangleLines(ind_button_x, ind_button_y, ind_button_w, ind_button_h, ind_border_color);
 	DrawTextEx(st->text_font_large, color_strings[st->mode][st->which_fixed],
-		(Vector2) {ind_button_x+23*dpi, ind_button_y+(ind_button_h-40.0f*dpi)/2.0f}, 40.*dpi, 2*dpi, WHITE);
-	if (CheckCollisionPointRec(pos, (Rectangle) { ind_button_x, ind_button_y, ind_button_w, ind_tabs_y-ind_button_y})) {
+		(Vector2) {ind_button_x+ind_button_w/2.0f-st->large_char_width/2.0f,
+			ind_button_y+(ind_button_h-40.0f*dpi)/2.0f}, 40.*dpi, 2*dpi, WHITE);
+	if (CheckCollisionPointRec(pos, (Rectangle) { ind_button_x, ind_button_y, ind_button_w,
+		ind_tabs_y-ind_button_y})) {
 		if (st->cursor_state == CURSOR_START) {
 			st->which_fixed = (st->which_fixed + 1) % 3;
-			switch_into_mode(st, st->mode, st->which_fixed, ci);
+			update_color_or_mode(st, st->mode, st->which_fixed, ci);
 			ind_button_hover_v = 0;
 		}
 		if (st->cursor_state != CURSOR_DOWN) {
@@ -655,7 +723,7 @@ void draw_ui_and_respond_input(struct state *st)
 	if (tab_select(&rgb_select, pos, st->cursor_state)) {
 		st->mode = 0;
 		st->which_fixed = rgb_select.sel_i;
-		switch_into_mode(st, st->mode, st->which_fixed, ci);
+		update_color_or_mode(st, st->mode, st->which_fixed, ci);
 	}
 	hsv_select.x = ind_button_x;
 	hsv_select.y = ind_button_y + ind_button_h;
@@ -664,7 +732,7 @@ void draw_ui_and_respond_input(struct state *st)
 	if (tab_select(&hsv_select, pos, st->cursor_state)) {
 		st->mode = 1;
 		st->which_fixed = hsv_select.sel_i;
-		switch_into_mode(st, st->mode, st->which_fixed, ci);
+		update_color_or_mode(st, st->mode, st->which_fixed, ci);
 	}
 
 	// hsv-rgb toggle
@@ -674,7 +742,7 @@ void draw_ui_and_respond_input(struct state *st)
 	int toggle_button_h = 20*dpi;
 
 	// fixed value slider
-	int val_slider_x = ind_button_x + ind_button_w + 20*dpi;
+	int val_slider_x = ind_button_x + ind_button_w + 30*dpi;
 	int val_slider_y = ind_button_y + ind_button_h / 2.0f;
 	int val_slider_w = grad_square_x_end - val_slider_x;
 	int val_slider_h = 60*dpi;
@@ -684,42 +752,122 @@ void draw_ui_and_respond_input(struct state *st)
 	{
 		int bar_h = 8*dpi;
 		int circle_r = 15*dpi;
-		DrawRectangle(val_slider_x, val_slider_y-bar_h/2.0f, val_slider_w, 6*dpi, st->text_color);
+		DrawRectangle(val_slider_x, val_slider_y-bar_h/2.0f, val_slider_w, bar_h, st->text_color);
 		Vector2 circle_center = { val_slider_x + val_slider_offset, val_slider_y };
 		DrawCircleV(circle_center, 15*dpi, fixed_indication_color);
-	}
-	if (st->cursor_state == CURSOR_START || st->val_slider_dragging) {
-		TraceLog(LOG_DEBUG, "Received click. dragging: %d", st->val_slider_dragging);
-		Vector2 pos = GetMousePosition();
-		if (!st->val_slider_dragging && CheckCollisionPointRec(pos,
-			(Rectangle) { val_slider_x, val_slider_y-val_slider_h/2.0f, val_slider_w, val_slider_h } )) {
-			st->val_slider_dragging = true;
+		if (st->cursor_state == CURSOR_START || st->val_slider_dragging) {
+			TraceLog(LOG_DEBUG, "Received click. dragging: %d", st->val_slider_dragging);
+			Vector2 pos = GetMousePosition();
+			if (!st->val_slider_dragging && CheckCollisionPointRec(pos,
+				(Rectangle) { val_slider_x - circle_r, val_slider_y-val_slider_h/2.0f, val_slider_w+2*circle_r, val_slider_h } )) {
+				st->val_slider_dragging = true;
+			}
+			if (st->val_slider_dragging) {
+				val_slider_offset = MIN(val_slider_w, MAX(0, pos.x - val_slider_x));
+			}
+			st->fixed_value = MIN(MAX((float) val_slider_offset / val_slider_w, 0), 1.0);
 		}
-		if (st->val_slider_dragging) {
-			val_slider_offset = MIN(val_slider_w, MAX(0, pos.x - val_slider_x));
-		}
-		st->fixed_value = MIN(MAX((float) val_slider_offset / val_slider_w, 0), 1.0);
 	}
 
 
-	// color read out
+	int dppv = 3;
+	static Number_Select r_num_select = { "r:%-3d ", 0, 255 };
+	bool rgb_num_select_changed = false;
+	r_num_select.st = st;
+	r_num_select.anim_vdt = anim_vdt;
+	r_num_select.x = (st->screenWidth - st->medium_label_width) / 2;
+	r_num_select.y = val_slider_y + 75*dpi;
+	r_num_select.w = 6*(st->medium_char_width + 1.5*dpi);
+	r_num_select.h = 30*dpi;
+	r_num_select.drag_pixels_per_value = dppv;
+	r_num_select.value = cur_color.r;
+	if (number_select(&r_num_select, pos, st->cursor_state)) {
+		rgb_num_select_changed = true;
+	}
+	static Number_Select g_num_select = { "g:%-3d ", 0, 255 };
+	g_num_select.st = st;
+	g_num_select.anim_vdt = anim_vdt;
+	g_num_select.x = r_num_select.x + r_num_select.w;
+	g_num_select.y = r_num_select.y;
+	g_num_select.w = 6*(st->medium_char_width + 1.5*dpi);
+	g_num_select.h = 30*dpi;
+	g_num_select.drag_pixels_per_value = dppv;
+	g_num_select.value = cur_color.g;
+	if (number_select(&g_num_select, pos, st->cursor_state)) {
+		rgb_num_select_changed = true;
+	}
+	static Number_Select b_num_select = { "b:%-3d ", 0, 255 };
+	b_num_select.st = st;
+	b_num_select.anim_vdt = anim_vdt;
+	b_num_select.x = g_num_select.x + g_num_select.w;
+	b_num_select.y = r_num_select.y;
+	b_num_select.w = 6*(st->medium_char_width + 1.5*dpi);
+	b_num_select.h = 30*dpi;
+	b_num_select.drag_pixels_per_value = dppv;
+	b_num_select.value = cur_color.b;
+	if (number_select(&b_num_select, pos, st->cursor_state)) {
+		rgb_num_select_changed = true;
+	}
+	if (rgb_num_select_changed) {
+		Color new_rgb = { r_num_select.value, g_num_select.value, b_num_select.value };
+		Vector3 new_hsv = ColorToHSV(new_rgb);
+		struct color_info new_ci = { new_rgb, new_hsv };
+		update_color_or_mode(st, st->mode, st->which_fixed, new_ci);
+	}
+
 	char value[40];
-	sprintf(value, "r:%-3d g:%-3d b:%-3d hex:#%02x%02x%02x", cur_color.r, cur_color.g, cur_color.b,
-		cur_color.r, cur_color.g, cur_color.b);
+	sprintf(value, "hex:#%02x%02x%02x", cur_color.r, cur_color.g, cur_color.b);
+	int hex_label_x = b_num_select.x + b_num_select.w;
+	int hex_label_y = r_num_select.y;
+	DrawTextEx(st->text_font_medium, value, (Vector2) {hex_label_x, hex_label_y}, 30.*dpi,
+		1.5*dpi, st->text_color);
 
-	int label_x = (st->screenWidth - st->medium_label_width) / 2;
-	DrawTextEx(st->text_font_medium, value, (Vector2) {label_x, val_slider_y + 85*dpi}, 30.*dpi,
-		1.5*dpi, st->text_color);
-	char h_value[8];
-	sprintf(h_value, "%d\xc2\xb0", (int) cur_hsv.x);
-	char s_value[10];
-	sprintf(s_value, "%d%%", (int)(cur_hsv.y*100));
-	char v_value[10];
-	sprintf(v_value, "%d%%", (int)(cur_hsv.z*100));
-	char hsv_value[30];
-	sprintf(hsv_value, "h:%-5s s:%-4s v:%-3s", h_value, s_value, v_value);
-	DrawTextEx(st->text_font_medium, hsv_value, (Vector2) {label_x, val_slider_y + 125*dpi}, 30.*dpi,
-		1.5*dpi, st->text_color);
+	bool hsv_num_select_changed = false;
+	static Number_Select h_num_select = { "h:%d\xc2\xb0 ", 0, 359 };
+	h_num_select.st = st;
+	h_num_select.anim_vdt = anim_vdt;
+	h_num_select.x = r_num_select.x;
+	h_num_select.y = r_num_select.y + 35*dpi;
+	h_num_select.w = 7*(st->medium_char_width + 1.5*dpi);
+	h_num_select.h = 30*dpi;
+	h_num_select.drag_pixels_per_value = dppv;
+	h_num_select.value = cur_hsv.x;
+	if (number_select(&h_num_select, pos, st->cursor_state)) {
+		hsv_num_select_changed = true;
+	}
+	static Number_Select s_num_select = { "s:%d%% ", 0, 100 };
+	s_num_select.st = st;
+	s_num_select.anim_vdt = anim_vdt;
+	s_num_select.x = h_num_select.x + h_num_select.w;
+	s_num_select.y = h_num_select.y;
+	s_num_select.w = 7*(st->medium_char_width + 1.5*dpi);
+	s_num_select.h = 30*dpi;
+	s_num_select.drag_pixels_per_value = dppv;
+	s_num_select.value = cur_hsv.y * 100.0f;
+	if (number_select(&s_num_select, pos, st->cursor_state)) {
+		hsv_num_select_changed = true;
+	}
+	static Number_Select v_num_select = { "v:%d%% ", 0, 100 };
+	v_num_select.st = st;
+	v_num_select.anim_vdt = anim_vdt;
+	v_num_select.x = s_num_select.x + s_num_select.w;
+	v_num_select.y = h_num_select.y;
+	v_num_select.w = 7*(st->medium_char_width + 1.5*dpi);
+	v_num_select.h = 30*dpi;
+	v_num_select.drag_pixels_per_value = dppv;
+	v_num_select.value = cur_hsv.z * 100.0f;
+	if (number_select(&v_num_select, pos, st->cursor_state)) {
+		hsv_num_select_changed = true;
+	}
+	if (hsv_num_select_changed) {
+		Vector3 new_hsv = { h_num_select.value, s_num_select.value / 100.0f, v_num_select.value / 100.0f };
+		Color new_rgb = ColorFromHSV(new_hsv.x, new_hsv.y, new_hsv.z);
+		struct color_info new_ci = { new_rgb, new_hsv };
+		update_color_or_mode(st, st->mode, st->which_fixed, new_ci);
+	}
+	if (rgb_num_select_changed && hsv_num_select_changed) {
+		printf("rgb and hsv selects changed\n");
+	}
 
 	double now = GetTime();
 	if (st->outfile.path && now - st->outfile.last_write_time > WRITE_INTERVAL &&
@@ -769,13 +917,17 @@ void init_for_dpi(struct state *st, float dpi, float old_dpi)
 		30*dpi, 1.5*dpi).x;
 	st->small_char_width = MeasureTextEx(st->text_font_small, "R",
 		22*dpi, 0*dpi).x;
+	st->medium_char_width = MeasureTextEx(st->text_font_medium, "R",
+		30*dpi, 0*dpi).x;
+	st->large_char_width = MeasureTextEx(st->text_font_large, "R",
+		40*dpi, 0*dpi).x;
 }
 
 int main(int argc, char *argv[])
 {
 	struct state *st = (struct state *) calloc(1, sizeof(struct state));
 	st->screenWidth = 680;
-	st->screenHeight = 780;
+	st->screenHeight = 800;
 	st->mode = 0;
 	st->which_fixed = 2;
 	st->saved_fixed = 0;
@@ -827,8 +979,7 @@ int main(int argc, char *argv[])
 	if (st->debug && st->outfile.path) {
 		printf("outfile: %s\n", st->outfile.path);
 	}
-
-	SetConfigFlags(FLAG_WINDOW_RESIZABLE);
+	SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_MSAA_4X_HINT);
 	SetTraceLogLevel(LOG_WARNING);
 	InitWindow(st->screenWidth, st->screenHeight, "Cpick");
 	st->hsv_grad_shader = LoadShaderFromMemory(NULL, hsv_grad_fragshader);
