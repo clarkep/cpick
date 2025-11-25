@@ -15,6 +15,7 @@ License: GPL 3(see LICENSE)
 #include <stdint.h>
 #include <string.h> // strcmp, strchr, memcpy
 #include <stdarg.h>
+#include <assert.h>
 #include <errno.h>
 #include <math.h> // round
 #include <raylib.h>
@@ -112,7 +113,7 @@ typedef struct number_select {
 	bool dragging;
 	int drag_start_value;
 	int drag_start_y;
-	float hover_v;
+	float shade_v;
 	bool input_active;
 	int input_n;
 } Number_Select;
@@ -508,40 +509,72 @@ bool number_select(Number_Select *self, Vector2 pos, enum cursor_state cs, int k
 {
 	State *st = self->st;
 	float dpi = st->dpi;
-	char text[20];
-	int n_chars = snprintf(text, 20, self->fmt, self->input_active ? self->input_n : self->value);
 	int new_value = self->value;
 	/*
 	// if changing font, may need to measure.
 	self->w = (st->medium_char_width + 1.5*dpi) * n_chars;
 	self->h = 30*dpi;
 	*/
-	Color hl_color;
-	if (self->selected) {
-		hl_color = (Color) { 192, 192, 192, 128 };
-	} else {
-		hl_color = (Color) { 192, 192, 192, 128 * self->hover_v };
-	}
+	int a = 64 + self->shade_v;
+	Color hl_color = { a, a, a, self->shade_v };
+
+	bool hovered = false;
 	DrawRectangleRounded((Rectangle) { self->x - 10*dpi, self->y, self->w, self->h }, 0.5f, 30, hl_color);
+	char text[21];
+	memset(text, 0, 21);
 	if (self->input_active) {
-		DrawTextEx(st->text_font_medium, text, (Vector2) { self->x, self->y }, 30*dpi, 1.5*dpi,
-			YELLOW);
+		// Color only the number(%d) in the string fmt(there must be one and only one %d)
+		int text_i = 0;
+		int fmt_i = 0;
+		int d_i;
+		int d_chars;
+		int len = strlen(self->fmt);
+		while (fmt_i <= len-2) {
+			if (self->fmt[fmt_i] == '%' && self->fmt[fmt_i+1] == 'd') {
+				d_chars = snprintf(text+text_i, 20-fmt_i, "%d", self->input_n);
+				d_i = text_i;
+				fmt_i += 2;
+				text_i += d_chars;
+				continue;
+			} else if (self->fmt[fmt_i] == '%' && self->fmt[fmt_i+1] == '%') {
+				// manually convert %% to % by skipping the first %
+				fmt_i++;
+				continue;
+			} else {
+				text[text_i++] = self->fmt[fmt_i++];
+			}
+			assert(text_i < 20);
+		}
+		text[text_i++] = self->fmt[fmt_i++];
+		int x = self->x;
+		// snprintf to replace %% with %
+		char c = text[d_i];
+		text[d_i] = '\0';
+		DrawTextEx(st->text_font_medium, text, (Vector2) { x, self->y }, 30*dpi, 1.5*dpi,
+			st->text_color);
+		text[d_i] = c;
+		x += d_i*(st->medium_char_width + 1.5*dpi);
+		c = text[d_i + d_chars];
+		DrawTextEx(st->text_font_medium, &text[d_i], (Vector2) { x, self->y }, 30*dpi, 1.5*dpi,
+			st->text_color.r < 128 ? GetColor(0x303030ff) : GetColor(0xd8d8d8ff));
+		text[d_i + d_chars] = c;
+		x += d_chars * (st->medium_char_width + 1.5*dpi);
+		DrawTextEx(st->text_font_medium, &text[d_i+d_chars], (Vector2) { x, self->y }, 30*dpi, 1.5*dpi,
+			st->text_color);
 	} else {
+		int n_chars = snprintf(text, 20, self->fmt, self->input_active ? self->input_n : self->value);
 		DrawTextEx(st->text_font_medium, text, (Vector2) { self->x, self->y }, 30*dpi, 1.5*dpi,
 			st->text_color);
 	}
 	bool hit = CheckCollisionPointRec(pos, (Rectangle) { self->x, self->y, self->w, self->h });
 	// xx can this logic be simplified?
 	if ((hit && cs != CURSOR_DOWN) || self->dragging) {
-		self->hover_v = MIN(self->hover_v + self->anim_vdt, 1.0f);
+		hovered = true;
 	}
-	if (!hit && !self->dragging) {
-		self->hover_v = MAX(self->hover_v - self->anim_vdt, 0.0f);
-	}
-	// self->dragging here ensure the click that's ending started on the widget. Maybe should be
-	// replaced with something that makes sure the mouse never left during the click.
+	// xx self->dragging here ensures that the click that's ending now started on the widget, but not that
+	// it never left.
 	if (hit && cs == CURSOR_STOP && self->dragging) {
-		self->selected = !self->selected;
+		self->selected = true;
 	}
 	if (!hit && cs == CURSOR_START) {
 		self->selected = false;
@@ -551,7 +584,7 @@ bool number_select(Number_Select *self, Vector2 pos, enum cursor_state cs, int k
 		int key_num = (key >= KEY_ZERO && key <= KEY_NINE) ? (key - KEY_ZERO)
 			: (key >= KEY_KP_0 && key <= KEY_KP_9 ? (key - KEY_KP_0) : -1);
 		if (!self->input_active && key_num >= 0) {
-			// This prevents input if self->min > 9, but that doesn't apply to us and would require
+			// This breaks input if self->min > 9, but that doesn't apply to us and would require
 			// some special logic.
 			if (key_num >= self->min && key_num <= self->max) {
 				self->input_active = true;
@@ -597,12 +630,19 @@ bool number_select(Number_Select *self, Vector2 pos, enum cursor_state cs, int k
 		} else {
 			new_value = CLAMP(new_value, self->min, self->max);
 			if (new_value == self->max || new_value == self->min) {
-				// So that you can go past the end, keep going, and then get immediate changes coming back
+				// so that you can go past the end, and get immediate changes coming back
 				self->drag_start_value = new_value;
 				self->drag_start_y = pos.y;
 			}
 		}
 	}
+	int shade_v_target = 0;
+	if (self->selected) {
+		shade_v_target = 128;
+	} else if (hovered) {
+		shade_v_target = 102;
+	}
+	value_creep_towards(&self->shade_v, shade_v_target, self->anim_vdt * 100);
 	if (new_value != self->value) {
 		self->value = new_value;
 		return true;
@@ -899,20 +939,20 @@ void draw_ui_and_respond_input(struct state *st)
 	int r_select_y = val_slider_y + 75*dpi;
 	static Number_Select r_num_select;
 	r_num_select.value = cur_color.r;
-	if (number_select_immargs(&r_num_select, "r:%-3d ", 0, 255, false, st, anim_vdt,
+	if (number_select_immargs(&r_num_select, "r:%d ", 0, 255, false, st, anim_vdt,
 		r_select_x, r_select_y, rgb_select_w, 30*dpi, 800.0f / 256.0f, pos, st->cursor_state, key)) {
 		rgb_num_select_changed = true;
 	}
 	static Number_Select g_num_select;
 	g_num_select.value = cur_color.g;
-	if (number_select_immargs(&g_num_select, "g:%-3d ", 0, 255, false, st, anim_vdt,
+	if (number_select_immargs(&g_num_select, "g:%d ", 0, 255, false, st, anim_vdt,
 		r_num_select.x+r_num_select.w, r_num_select.y, rgb_select_w, 30*dpi, 800.0f / 256.0f,
 		pos, st->cursor_state, key)) {
 		rgb_num_select_changed = true;
 	}
 	static Number_Select b_num_select;
 	b_num_select.value = cur_color.b;
-	if (number_select_immargs(&b_num_select, "b:%-3d ", 0, 255, false, st, anim_vdt,
+	if (number_select_immargs(&b_num_select, "b:%d ", 0, 255, false, st, anim_vdt,
 		g_num_select.x+g_num_select.w, g_num_select.y, rgb_select_w, 30*dpi, 800.0f / 256.0f,
 		pos, st->cursor_state, key)) {
 		rgb_num_select_changed = true;
