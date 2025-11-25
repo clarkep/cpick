@@ -1,2 +1,2 @@
 #!/bin/bash
-clang -o cpick cpick.c $(pkg-config --libs --cflags raylib) -lm
+gcc -g -o cpick cpick.c $(pkg-config --libs --cflags raylib) -lm

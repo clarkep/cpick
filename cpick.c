@@ -89,6 +89,7 @@ typedef struct tab_select
 	int y;
 	int w;
 	int h;
+	bool top;
 	// internal state:
 	int sel_i;
 	float hover_v[3];
@@ -463,25 +464,32 @@ bool tab_select(Tab_Select *self, Vector2 pos, enum cursor_state cs)
 	char text[2] = "X";
 	float x = self->x;
 	float tw = self->w / 3.0;
-	DrawRectangle(x, self->y, tw, self->h, color1);
-	DrawRectangleLines(x, self->y, tw, self->h, self->border_color);
+	float rnd = 0.5; // rounded rectangle roundness
+	float segs = 20; // rounded rectangle segments
+	float off = 10 * dpi;
+	float y = self->top ? self->y : self->y - off;
+	float h = self->h + off;
+	DrawRectangleRounded((Rectangle) { x, y, tw + off, h}, rnd, segs, color1);
+	DrawRectangleRoundedLines((Rectangle) { x, y, tw +off, h }, rnd, segs, self->border_color);
 	text[0] = self->labels[0];
 	DrawTextEx(st->text_font_small, text, (Vector2) {x + (tw - st->small_char_width)/2.0,
 		self->y + (self->h-22*dpi)/2.0 }, 22*dpi, 2*dpi, text_color1);
-	x += tw;
-	DrawRectangle(x, self->y, tw, self->h, color2);
-	DrawRectangleLines(x, self->y, tw, self->h, self->border_color);
-	text[0] = self->labels[1];
-	DrawTextEx(st->text_font_small, text, (Vector2) {x + (tw - st->small_char_width)/2.0,
-		self->y + (self->h-22*dpi)/2.0 }, 22*dpi, 2*dpi, text_color2);
-	int last_x = x + tw;
+	float x_mid = x + tw;
+	int last_x = x_mid + tw;
 	int end_x = self->x + self->w;
 	int last_w = end_x - last_x;
-	DrawRectangle(last_x, self->y, last_w, self->h, color3);
-	DrawRectangleLines(last_x, self->y, last_w, self->h, self->border_color);
+	DrawRectangleRounded((Rectangle) { last_x - off, y, last_w + off, h}, rnd, segs, color3);
+	DrawRectangleRoundedLines((Rectangle) { last_x - off, y, last_w + off, h }, rnd, segs, self->border_color);
 	text[0] = self->labels[2];
 	DrawTextEx(st->text_font_small, text, (Vector2) {last_x + (last_w - st->small_char_width)/2.0,
 		self->y + (self->h-22*dpi)/2.0 }, 22*dpi, 2*dpi, text_color3);
+
+	// XX y-1, h+2 to correct for Rounded bulge
+	DrawRectangle(x_mid, self->y-(int)self->top, tw, self->h+1, color2);
+	DrawRectangleLines(x_mid, self->y-1, tw, self->h+1, self->border_color);
+	text[0] = self->labels[1];
+	DrawTextEx(st->text_font_small, text, (Vector2) {x_mid + (tw - st->small_char_width)/2.0,
+		self->y + (self->h-22*dpi)/2.0 }, 22*dpi, 2*dpi, text_color2);
 
 	bool updated = false;
 	float hover_targets[3] = { 0.0f, 0.0f, 0.0f };
@@ -547,7 +555,6 @@ bool number_select(Number_Select *self, Vector2 pos, enum cursor_state cs, int k
 		}
 		text[text_i++] = self->fmt[fmt_i++];
 		int x = self->x;
-		// snprintf to replace %% with %
 		char c = text[d_i];
 		text[d_i] = '\0';
 		DrawTextEx(st->text_font_medium, text, (Vector2) { x, self->y }, 30*dpi, 1.5*dpi,
@@ -799,36 +806,14 @@ void draw_ui_and_respond_input(struct state *st)
 	int top_tabs_x = grad_square_x;
 	int top_tabs_y = grad_square_y_end + x_axis_h + 12*dpi;
 	int top_tabs_h = 20*dpi;
-	int top_tabs_w = 70*dpi;
+	int top_tabs_w = 80*dpi;
 	int ind_button_x = top_tabs_x;
 	int ind_button_y = top_tabs_y + top_tabs_h;
 	int ind_button_w = top_tabs_w;
-	int ind_button_h = 60*dpi;
+	int ind_button_h = 70*dpi;
 	// int ind_tabs_y = ind_button_y + ind_button_h - ind_tabs_h - 1;
 	int ind_tabs_y = ind_button_y + ind_button_h;
 	Color ind_border_color = GetColor(0xb0b0b0ff);
-	// main button
-	static float ind_button_hover_v = 0;
-	float hov_bright = .4;
-	Color fixed_button_color = ColorBrightness(light_text_indication_color, ind_button_hover_v * hov_bright);
-	DrawRectangle(ind_button_x, ind_button_y, ind_button_w, ind_button_h, fixed_button_color);
-	DrawRectangleLines(ind_button_x, ind_button_y, ind_button_w, ind_button_h, ind_border_color);
-	DrawTextEx(st->text_font_large, color_strings[st->mode][st->which_fixed],
-		(Vector2) {ind_button_x+ind_button_w/2.0f-st->large_char_width/2.0f,
-			ind_button_y+(ind_button_h-40.0f*dpi)/2.0f}, 40.*dpi, 2*dpi, WHITE);
-	if (CheckCollisionPointRec(pos, (Rectangle) { ind_button_x, ind_button_y, ind_button_w,
-		ind_tabs_y-ind_button_y})) {
-		if (st->cursor_state == CURSOR_START) {
-			st->which_fixed = (st->which_fixed + 1) % 3;
-			update_color_or_mode(st, st->mode, st->which_fixed, ci);
-			ind_button_hover_v = 0;
-		}
-		if (st->cursor_state != CURSOR_DOWN) {
-			ind_button_hover_v = MIN(ind_button_hover_v + anim_vdt, 1.0);
-		}
-	} else {
-		ind_button_hover_v = MAX(ind_button_hover_v - anim_vdt, 0.0);
-	}
 	// tabs
 	Color color1, color2, color3; // tab colors
 	static Tab_Select rgb_select;
@@ -846,6 +831,7 @@ void draw_ui_and_respond_input(struct state *st)
 		rgb_select.labels[0] = 'R';
 		rgb_select.labels[1] = 'G';
 		rgb_select.labels[2] = 'B';
+		rgb_select.top = true;
 		int a = light_text_bright_grey_bg;
 		int b = light_text_dim_grey_bg;
 		Color bright = { a, a, a, 255 };
@@ -866,6 +852,7 @@ void draw_ui_and_respond_input(struct state *st)
 		hsv_select.hover_brightness = sel_hov_brightness;
 		hsv_select.anim_vdt = anim_vdt;
 		hsv_select.st = st;
+		hsv_select.top = false;
 		first_frame_setup_done = true;
 	}
 	rgb_select.border_color = ind_border_color;
@@ -894,6 +881,29 @@ void draw_ui_and_respond_input(struct state *st)
 		st->mode = 1;
 		st->which_fixed = hsv_select.sel_i;
 		update_color_or_mode(st, st->mode, st->which_fixed, ci);
+	}
+	// main button
+	static float ind_button_hover_v = 0;
+	float hov_bright = .4;
+	Color fixed_button_color = ColorBrightness(light_text_indication_color, ind_button_hover_v * hov_bright);
+	// XX x-1, w+2 to correct for Rounded bulge
+	DrawRectangle(ind_button_x-1, ind_button_y, ind_button_w+2, ind_button_h, fixed_button_color);
+	DrawRectangleLines(ind_button_x-1, ind_button_y, ind_button_w+2, ind_button_h, ind_border_color);
+	DrawTextEx(st->text_font_large, color_strings[st->mode][st->which_fixed],
+		(Vector2) {ind_button_x+ind_button_w/2.0f-st->large_char_width/2.0f,
+			ind_button_y+(ind_button_h-40.0f*dpi)/2.0f}, 40.*dpi, 2*dpi, WHITE);
+	if (CheckCollisionPointRec(pos, (Rectangle) { ind_button_x, ind_button_y, ind_button_w,
+		ind_tabs_y-ind_button_y})) {
+		if (st->cursor_state == CURSOR_START) {
+			st->which_fixed = (st->which_fixed + 1) % 3;
+			update_color_or_mode(st, st->mode, st->which_fixed, ci);
+			ind_button_hover_v = 0;
+		}
+		if (st->cursor_state != CURSOR_DOWN) {
+			ind_button_hover_v = MIN(ind_button_hover_v + anim_vdt, 1.0);
+		}
+	} else {
+		ind_button_hover_v = MAX(ind_button_hover_v - anim_vdt, 0.0);
 	}
 
 	// hsv-rgb toggle
