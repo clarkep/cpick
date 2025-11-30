@@ -21,11 +21,8 @@ License: GPL 3(see LICENSE)
 #include <raylib.h>
 #include <rlgl.h>
 
-#include "font/noto_sans_mono_mini.h"
-
-#define MIN(x, y) ((x) <= (y) ? (x) : (y))
-#define MAX(x, y) ((x) > (y) ? (x) : (y))
-#define CLAMP(x, min, max) ((x) < (min) ? (min) : ((x) > (max) ? (max) : (x)))
+#include "font/noto_sans_mono.h"
+#include "shapes.h"
 
 #define WRITE_INTERVAL 1.0
 
@@ -138,6 +135,8 @@ void myassert(bool p, char *fmt, ...) {
 		exit(1);
 	}
 }
+
+
 
 void value_creep_towards(float *val, float target, float amount)
 {
@@ -270,10 +269,10 @@ void write_color_to_file(struct state *st, Color color)
 	FILE *f = fopen(st->outfile.path, "r+b");
 	myassert(f, "Failed to open file: %s.\n", st->outfile.path);
 	int res = fseek(f, st->outfile.offset, SEEK_SET);
-	myassert(!res, "Failed to write offset %lu in file %s.\n", st->outfile.offset, st->outfile.path);
+	myassert(!res, "Failed to write byte %lu in file %s.\n", st->outfile.offset, st->outfile.path);
 	fwrite(color_text, 1, 7, f);
 	if (st->debug)
-		printf("Wrote %s to %s:%lu.\n", color_text, st->outfile.path,
+		printf("Wrote %s to %s byte %lu.\n", color_text, st->outfile.path,
 			st->outfile.offset);
 	fclose(f);
 }
@@ -469,7 +468,8 @@ bool tab_select(Tab_Select *self, Vector2 pos, enum cursor_state cs)
 	float off = 10 * dpi;
 	float y = self->top ? self->y : self->y - off;
 	float h = self->h + off;
-	DrawRectangleRounded((Rectangle) { x, y, tw + off, h}, rnd, segs, color1);
+	// XX y-1, h+1 to correct for RoundedLines bulge
+	DrawRectangleRounded((Rectangle) { x, y-(int)self->top, tw + off, h+1}, rnd, segs, color1);
 	DrawRectangleRoundedLines((Rectangle) { x, y, tw +off, h }, rnd, segs, self->border_color);
 	text[0] = self->labels[0];
 	DrawTextEx(st->text_font_small, text, (Vector2) {x + (tw - st->small_char_width)/2.0,
@@ -478,15 +478,14 @@ bool tab_select(Tab_Select *self, Vector2 pos, enum cursor_state cs)
 	int last_x = x_mid + tw;
 	int end_x = self->x + self->w;
 	int last_w = end_x - last_x;
-	DrawRectangleRounded((Rectangle) { last_x - off, y, last_w + off, h}, rnd, segs, color3);
+	DrawRectangleRounded((Rectangle) { last_x - off, y-(int)self->top, last_w + off, h+1}, rnd, segs, color3);
 	DrawRectangleRoundedLines((Rectangle) { last_x - off, y, last_w + off, h }, rnd, segs, self->border_color);
 	text[0] = self->labels[2];
 	DrawTextEx(st->text_font_small, text, (Vector2) {last_x + (last_w - st->small_char_width)/2.0,
 		self->y + (self->h-22*dpi)/2.0 }, 22*dpi, 2*dpi, text_color3);
 
-	// XX y-1, h+2 to correct for Rounded bulge
 	DrawRectangle(x_mid, self->y-(int)self->top, tw, self->h+1, color2);
-	DrawRectangleLines(x_mid, self->y-1, tw, self->h+1, self->border_color);
+	DrawRectangleLines(x_mid, self->y-(int)self->top, tw, self->h+1, self->border_color);
 	text[0] = self->labels[1];
 	DrawTextEx(st->text_font_small, text, (Vector2) {x_mid + (tw - st->small_char_width)/2.0,
 		self->y + (self->h-22*dpi)/2.0 }, 22*dpi, 2*dpi, text_color2);
@@ -727,13 +726,34 @@ void draw_ui_and_respond_input(struct state *st)
 		light_text_indication_color = (Color) { b, b, b, 255 };
 	}
 
+	// output file indicator
+	int out_ind_top_w = 512*dpi;
+	int out_ind_bottom_w = 462*dpi;
+	int out_ind_h = 30*dpi;
+	int out_ind_top_x = (st->screenWidth - out_ind_top_w) / 2.0f;
+	int out_ind_bottom_x = (st->screenWidth - out_ind_bottom_w) / 2.0f;
+	int out_ind_top_y = 0;
+	int out_ind_bottom_y = out_ind_top_y + out_ind_h;
+	Vector2 out_ind_verts[4] = { { out_ind_bottom_x, out_ind_bottom_y }, { out_ind_bottom_x + out_ind_bottom_w, out_ind_bottom_y},
+	{ out_ind_top_x + out_ind_top_w, out_ind_top_y }, { out_ind_top_x, out_ind_top_y }};
+	bool out_ind_rounded[4] = { true, true, false, false };
+	Color out_ind_bgcolor = { 48, 48, 48, 192 };
+	if (st->outfile.path) {
+		char out_ind_text[30];
+		int n = snprintf(out_ind_text, 30, "Writing to %s @ %lu...", st->outfile.path, st->outfile.offset);
+		int text_x = out_ind_bottom_x + (out_ind_bottom_w - n*(st->small_char_width+1.0*dpi))/2.0f;
+		draw_rounded_quadrilateral(out_ind_verts, out_ind_rounded, 12*dpi, 12, out_ind_bgcolor);
+		DrawTextEx(st->text_font_small, out_ind_text, (Vector2) { text_x, out_ind_top_y + 3*dpi },
+			22*dpi, 1.0*dpi, WHITE);
+	}
+
 	// gradient
 	int y_axis_w = 30*dpi;
 	int x_axis_h = 30*dpi;
 	int grad_square_w = 512*dpi + y_axis_w;
 	int grad_square_h = 512*dpi + x_axis_h;
 	int grad_square_x = (st->screenWidth - 512*dpi)/2;
-	int grad_square_y = 30*dpi;
+	int grad_square_y = out_ind_bottom_y+20*dpi;
 	int grad_square_y_end = grad_square_y + 512*dpi;
 	int grad_square_x_end = grad_square_x + 512*dpi;
 	bool square = true;
@@ -804,9 +824,9 @@ void draw_ui_and_respond_input(struct state *st)
 
 	// fixed color buttons
 	int top_tabs_x = grad_square_x;
-	int top_tabs_y = grad_square_y_end + x_axis_h + 12*dpi;
-	int top_tabs_h = 20*dpi;
-	int top_tabs_w = 80*dpi;
+	int top_tabs_y = grad_square_y_end + x_axis_h;
+	int top_tabs_h = 25*dpi;
+	int top_tabs_w = 90*dpi;
 	int ind_button_x = top_tabs_x;
 	int ind_button_y = top_tabs_y + top_tabs_h;
 	int ind_button_w = top_tabs_w;
@@ -1059,11 +1079,15 @@ void init_for_dpi(struct state *st, float dpi, float old_dpi)
 		st->screenHeight = GetScreenHeight();
 	}
 
+/*
 	st->text_font_small = LoadFontFromMemory(".ttf", noto_sans_mono_mini_ttf, noto_sans_mono_mini_ttf_len,
 		22*dpi, small_codepoints, sizeof(small_codepoints)/sizeof(int));
-	st->text_font_medium = LoadFontFromMemory(".ttf", noto_sans_mono_mini_ttf, noto_sans_mono_mini_ttf_len,
+*/
+	st->text_font_small = LoadFontFromMemory(".ttf", noto_sans_mono, noto_sans_mono_len,
+		22*dpi, NULL, 0);
+	st->text_font_medium = LoadFontFromMemory(".ttf", noto_sans_mono, noto_sans_mono_len,
 		30*dpi, medium_codepoints, sizeof(medium_codepoints)/sizeof(int));
-	st->text_font_large = LoadFontFromMemory(".ttf", noto_sans_mono_mini_ttf, noto_sans_mono_mini_ttf_len,
+	st->text_font_large = LoadFontFromMemory(".ttf", noto_sans_mono, noto_sans_mono_len,
 		40*dpi, large_codepoints, sizeof(large_codepoints)/sizeof(int));
 
 	// Measure the label width once; since it's a monospace font, it will be the same for all colors.
@@ -1081,7 +1105,7 @@ int main(int argc, char *argv[])
 {
 	struct state *st = (struct state *) calloc(1, sizeof(struct state));
 	st->screenWidth = 680;
-	st->screenHeight = 800;
+	st->screenHeight = 860;
 	st->mode = 0;
 	st->which_fixed = 2;
 	st->saved_fixed = 0;
@@ -1096,7 +1120,7 @@ int main(int argc, char *argv[])
 	st->outfile.format = 0;
 	st->outfile.last_write_time = GetTime();
 	st->outfile.last_write_color = (Color) { 0, 0, 0, 255 };
-	st->debug = true;
+	st->debug = false;
 
 	for (int i=1; i<argc; i++) {
 		char *arg = argv[i];
@@ -1131,7 +1155,7 @@ int main(int argc, char *argv[])
 	}
 
 	if (st->debug && st->outfile.path) {
-		printf("outfile: %s\n", st->outfile.path);
+		printf("Outfile: %s\n", st->outfile.path);
 	}
 	SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_MSAA_4X_HINT);
 	SetTraceLogLevel(LOG_WARNING);
