@@ -753,7 +753,7 @@ void draw_ui_and_respond_input(struct state *st)
 	int grad_square_w = 512*dpi + y_axis_w;
 	int grad_square_h = 512*dpi + x_axis_h;
 	int grad_square_x = (st->screenWidth - 512*dpi)/2;
-	int grad_square_y = out_ind_bottom_y+20*dpi;
+	int grad_square_y = out_ind_bottom_y+(st->outfile.path ? 10*dpi : 0)+20*dpi;
 	int grad_square_y_end = grad_square_y + 512*dpi;
 	int grad_square_x_end = grad_square_x + 512*dpi;
 	bool square = true;
