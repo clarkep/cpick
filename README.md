@@ -1,6 +1,6 @@
 # Cpick: a color picker
 
-Cpick is a simple RGB and HSV color picker that can write output colors to files.
+Cpick is a simple RGB and HSV color picker that can write color values to files.
 
 ![screenshot](cpick.png)
 
