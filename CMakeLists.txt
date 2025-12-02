@@ -21,7 +21,7 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(raylib)
 
 # Our Project
-add_executable(${PROJECT_NAME} cpick.c)
+add_executable(${PROJECT_NAME} cpick.c shapes.c)
 #set(raylib_VERBOSE 1)
 
 target_link_libraries(${PROJECT_NAME} raylib)
