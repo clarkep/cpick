@@ -1,4 +1,3 @@
-#include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
 #include <raylib.h>
@@ -6,6 +5,10 @@
 #include <rlgl.h>
 
 #include "shapes.h"
+
+#ifndef M_PI
+#define M_PI 3.14159265358979323846f
+#endif
 
 Vector2 normalize_v2(Vector2 v)
 {
