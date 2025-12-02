@@ -136,7 +136,29 @@ void myassert(bool p, char *fmt, ...) {
 	}
 }
 
-
+bool read_color_from_outfile_and_maybe_update_offset(struct state *st, Color *c)
+{
+	char *format = "%02x%02x%02x";
+	FILE *f = fopen(st->outfile.path, "rb");
+	fseek(f, st->outfile.offset, SEEK_SET);
+	char str[8];
+	fread(str, 1, 7, f);
+	char *strptr = str;
+	if (*strptr == '#') {
+		st->outfile.offset++;
+		strptr++;
+	}
+	str[7] = '\0';
+	int r, b, g;
+	int n_parsed = sscanf(strptr, format, &r, &g, &b);
+	fclose(f);
+	if (n_parsed == 3 && r >= 0 && r <= 255 && g >= 0 && g <= 255 && b >= 0 && b <= 255) {
+		*c = (Color) { r, g, b, 255 };
+		return true;
+	} else {
+		return false;
+	}
+}
 
 void value_creep_towards(float *val, float target, float amount)
 {
@@ -264,13 +286,13 @@ struct color_info current_color(struct state *st)
 void write_color_to_file(struct state *st, Color color)
 {
 	char color_text[10];
-	sprintf(color_text, "#%02x%02x%02x", color.r, color.g, color.b);
+	sprintf(color_text, "%02x%02x%02x", color.r, color.g, color.b);
 
 	FILE *f = fopen(st->outfile.path, "r+b");
 	myassert(f, "Failed to open file: %s.\n", st->outfile.path);
 	int res = fseek(f, st->outfile.offset, SEEK_SET);
 	myassert(!res, "Failed to write byte %lu in file %s.\n", st->outfile.offset, st->outfile.path);
-	fwrite(color_text, 1, 7, f);
+	fwrite(color_text, 1, 6, f);
 	if (st->debug)
 		printf("Wrote %s to %s byte %lu.\n", color_text, st->outfile.path,
 			st->outfile.offset);
@@ -740,7 +762,7 @@ void draw_ui_and_respond_input(struct state *st)
 	Color out_ind_bgcolor = { 48, 48, 48, 192 };
 	if (st->outfile.path) {
 		char out_ind_text[30];
-		int n = snprintf(out_ind_text, 30, "Writing to %s @ %lu...", st->outfile.path, st->outfile.offset);
+		int n = snprintf(out_ind_text, 30, "out: %s @ %lu", st->outfile.path, st->outfile.offset);
 		int text_x = out_ind_bottom_x + (out_ind_bottom_w - n*(st->small_char_width+1.0*dpi))/2.0f;
 		draw_rounded_quadrilateral(out_ind_verts, out_ind_rounded, 12*dpi, 12, out_ind_bgcolor);
 		DrawTextEx(st->text_font_small, out_ind_text, (Vector2) { text_x, out_ind_top_y + 3*dpi },
@@ -1165,6 +1187,22 @@ int main(int argc, char *argv[])
 
 	st->dpi = GetWindowScaleDPI().x;
 	init_for_dpi(st, st->dpi, 1);
+
+	if (st->outfile.path) {
+		Color start_color;
+		bool success = read_color_from_outfile_and_maybe_update_offset(st, &start_color);
+		if (success) {
+			struct color_info ci;
+			ci.rgb = start_color;
+			ci.hsv = ColorToHSV(start_color);
+			update_color_or_mode(st, st->mode, st->which_fixed, ci);
+		} else {
+			// since we failed to read, we probably shouldn't write
+			fprintf(stderr, "CPick: Failed to find a valid rrggbb(or #rrggbb) color at %s byte offset %lu, so not writing "
+				"to the file.\n", st->outfile.path, st->outfile.offset);
+			st->outfile.path = NULL;
+		}
+	}
 
 	SetTargetFPS(60);
 	while (!WindowShouldClose())
