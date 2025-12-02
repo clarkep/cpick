@@ -63,7 +63,9 @@ typedef struct state {
 	Shader hsv_grad_shader;
 	struct {
 		char *path;
-		unsigned long offset;
+		char *shortened_path;
+		int shortened_path_len;
+		unsigned long long offset;
 		int format;
 		Color last_write_color;
 		double last_write_time;
@@ -294,7 +296,7 @@ void write_color_to_file(struct state *st, Color color)
 	myassert(!res, "Failed to write byte %lu in file %s.\n", st->outfile.offset, st->outfile.path);
 	fwrite(color_text, 1, 6, f);
 	if (st->debug)
-		printf("Wrote %s to %s byte %lu.\n", color_text, st->outfile.path,
+		printf("Wrote %s to %s byte %llu.\n", color_text, st->outfile.path,
 			st->outfile.offset);
 	fclose(f);
 }
@@ -761,11 +763,9 @@ void draw_ui_and_respond_input(struct state *st)
 	bool out_ind_rounded[4] = { true, true, false, false };
 	Color out_ind_bgcolor = { 48, 48, 48, 192 };
 	if (st->outfile.path) {
-		char out_ind_text[30];
-		int n = snprintf(out_ind_text, 30, "out: %s @ %lu", st->outfile.path, st->outfile.offset);
-		int text_x = out_ind_bottom_x + (out_ind_bottom_w - n*(st->small_char_width+1.0*dpi))/2.0f;
+		int text_x = out_ind_bottom_x + (out_ind_bottom_w - st->outfile.shortened_path_len*(st->small_char_width+1.0*dpi))/2.0f;
 		draw_rounded_quadrilateral(out_ind_verts, out_ind_rounded, 12*dpi, 12, out_ind_bgcolor);
-		DrawTextEx(st->text_font_small, out_ind_text, (Vector2) { text_x, out_ind_top_y + 3*dpi },
+		DrawTextEx(st->text_font_small, st->outfile.shortened_path, (Vector2) { text_x, out_ind_top_y + 3*dpi },
 			22*dpi, 1.0*dpi, WHITE);
 	}
 
@@ -857,7 +857,6 @@ void draw_ui_and_respond_input(struct state *st)
 	int ind_tabs_y = ind_button_y + ind_button_h;
 	Color ind_border_color = GetColor(0xb0b0b0ff);
 	// tabs
-	Color color1, color2, color3; // tab colors
 	static Tab_Select rgb_select;
 	static Tab_Select hsv_select;
 	static bool first_frame_setup_done = false;
@@ -1155,7 +1154,7 @@ int main(int argc, char *argv[])
 			} else if (strcmp(longarg, "offset")==0) {
 				myassert(i+1<argc && !st->outfile.offset, usage_str);
 				errno = 0;
-				st->outfile.offset = strtoul(argv[i+1], NULL, 10);
+				st->outfile.offset = strtoull(argv[i+1], NULL, 10);
 				myassert(!errno, usage_str);
 				i++;
 			}
@@ -1189,6 +1188,21 @@ int main(int argc, char *argv[])
 	init_for_dpi(st, st->dpi, 1);
 
 	if (st->outfile.path) {
+		int maxlen = 5 + (int) strlen(st->outfile.path) + 3 + 20 + 1;
+		char *spath = (char *) malloc(maxlen);
+		int n = snprintf(spath, maxlen, "out: %s @ %llu", st->outfile.path, st->outfile.offset);
+		int str_n = MIN(maxlen-1, n);
+		// Todo: expand based on window size
+		int max_chars = 46;
+		int remove = MAX(str_n - max_chars, 0);
+		if (remove) {
+			memmove(spath + 5, "...", 3);
+			memmove(spath + 8, spath+8+remove, str_n-(8+remove)+1);
+		}
+		st->outfile.shortened_path = spath;
+		st->outfile.shortened_path_len = str_n - remove;
+		assert(st->outfile.shortened_path_len == strlen(st->outfile.shortened_path));
+
 		Color start_color;
 		bool success = read_color_from_outfile_and_maybe_update_offset(st, &start_color);
 		if (success) {
@@ -1198,7 +1212,7 @@ int main(int argc, char *argv[])
 			update_color_or_mode(st, st->mode, st->which_fixed, ci);
 		} else {
 			// since we failed to read, we probably shouldn't write
-			fprintf(stderr, "CPick: Failed to find a valid rrggbb(or #rrggbb) color at %s byte offset %lu, so not writing "
+			fprintf(stderr, "CPick: Failed to find a valid rrggbb(or #rrggbb) color at %s byte offset %llu, so not writing "
 				"to the file.\n", st->outfile.path, st->outfile.offset);
 			st->outfile.path = NULL;
 		}
