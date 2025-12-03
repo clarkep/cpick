@@ -698,6 +698,17 @@ bool number_select_immargs(Number_Select *ns, char *fmt, int min, int max, bool 
 	return number_select(ns, pos, cs, key);
 }
 
+float luminance(unsigned int r, unsigned int g, unsigned int b)
+{
+  float rf = r / 255.0f;
+  float gf = g / 255.0f;
+  float bf = b / 255.0f;
+  float rs = rf <= 0.3928f ? rf / 12.92 : powf((rf+0.055f)/1.055f, 2.4f);
+  float gs = gf <= 0.3928f ? gf / 12.92 : powf((gf+0.055f)/1.055f, 2.4f);
+  float bs = bf <= 0.3928f ? bf / 12.92 : powf((bf+0.055f)/1.055f, 2.4f);
+  return 0.2126f * rs + 0.7152f * gs + 0.0722f * bs;
+}
+
 void draw_ui_and_respond_input(struct state *st)
 {
 	if (IsMouseButtonDown(0)) {
@@ -725,7 +736,7 @@ void draw_ui_and_respond_input(struct state *st)
 
 	float dpi = st->dpi;
 	// TODO: improve
-	if (cur_color.r*cur_color.r + cur_color.g*cur_color.g*1.6 + cur_color.b*cur_color.b > 97500) {
+	if (luminance(cur_color.r, cur_color.g, cur_color.b) >= 0.179) {
 		st->text_color = BLACK;
 	} else {
 		st->text_color = WHITE;
