@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.11) # FetchContent is available in 3.11+
-project(cpick)
+project(quickpick)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
@@ -21,7 +21,7 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(raylib)
 
 # Our Project
-add_executable(${PROJECT_NAME} cpick.c shapes.c)
+add_executable(${PROJECT_NAME} quickpick.c shapes.c)
 #set(raylib_VERBOSE 1)
 
 target_link_libraries(${PROJECT_NAME} raylib)

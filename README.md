@@ -1,18 +1,18 @@
-# Cpick: a color picker
+# QuickPick: a color picker
 
-Cpick is a simple RGB and HSV color picker that can write color values to files.
+QuickPick is a simple RGB and HSV color picker that can write color values to files.
 
-![screenshot](cpick.png)
+![screenshot](quickpick.png)
 
 Usage
 -----
-To launch cpick from a command line with an output file of test.txt, byte 7, use
+To launch QuickPick from a command line with an output file of test.txt, byte 7, use
 
-     $ cpick test.txt@7
+     $ quickpick test.txt@7
 
 or without an output file,
 
-     $ cpick
+     $ quickpick
 
 The central square shows a 2d slice of the RGB color space, and the slider
 moves the slice in the third dimension.
@@ -31,8 +31,8 @@ followed by
 
      $ cmake --build build
 
-This will fetch and build raylib if it is not found. On Windows, the executable is placed at `build\Debug\cpick.exe`
-by default, and on macOS or Linux it is placed at `build\cpick`.
+This will fetch and build raylib if it is not found. On Windows, the executable is placed at `build\Debug\quickpick.exe`
+by default, and on macOS or Linux it is placed at `build\quickpick`.
 
 Alternatively, if you are on macOS or Linux and raylib is already installed, you can use the simple build script:
 

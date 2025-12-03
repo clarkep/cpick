@@ -1,5 +1,5 @@
 /*
-cpick: a color picker
+quickpick: a color picker
 
 By: Paul Clarke
 Created: 4/10/2024
@@ -9,11 +9,10 @@ License: GPL 3(see LICENSE)
 #ifdef _WIN32
 #define _CRT_SECURE_NO_WARNINGS
 #endif
-
 #include <stdio.h>
 #include <stdlib.h> // malloc, exit
 #include <stdint.h>
-#include <string.h> // strcmp, strchr, memcpy
+#include <string.h>
 #include <stdarg.h>
 #include <assert.h>
 #include <errno.h>
@@ -405,7 +404,7 @@ void draw_gradient_circle_and_axes(int x, int y, int r, float fixed_val, struct 
 	DrawTextEx(st->text_font_small, "S",
 			   (Vector2) {arrow_end.x-16.0*dpi, arrow_end.y-31.0*dpi}, 22*dpi, 2.*dpi,
 			   st->text_color);
-	// h label
+	// h arrow
 	float harr_d = 30*dpi;
 	float harr_w = 2*dpi;
 	float harr_ang1 = 12;
@@ -1074,7 +1073,7 @@ void draw_ui_and_respond_input(struct state *st)
 }
 
 char *usage_str =
-"cpick [file@offset]\n"
+"quickpick [file@offset]\n"
 "Options:\n"
 "  --file FILE     choose a file to output to; alternative to file@offset\n"
 "  --offset N      choose an offset in FILE; alternative to file@offset\n";
@@ -1180,7 +1179,7 @@ int main(int argc, char *argv[])
 	}
 	SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_MSAA_4X_HINT);
 	SetTraceLogLevel(LOG_WARNING);
-	InitWindow(st->screenWidth, st->screenHeight, "Cpick");
+	InitWindow(st->screenWidth, st->screenHeight, "QuckPick");
 	SetExitKey(KEY_NULL);
 	st->hsv_grad_shader = LoadShaderFromMemory(NULL, hsv_grad_fragshader);
 
@@ -1212,7 +1211,7 @@ int main(int argc, char *argv[])
 			update_color_or_mode(st, st->mode, st->which_fixed, ci);
 		} else {
 			// since we failed to read, we probably shouldn't write
-			fprintf(stderr, "CPick: Failed to find a valid rrggbb(or #rrggbb) color at %s byte offset %llu, so not writing "
+			fprintf(stderr, "[QUICKPICK WARNING] Failed to find a valid rrggbb(or #rrggbb) color at %s byte offset %llu, so not writing "
 				"to the file.\n", st->outfile.path, st->outfile.offset);
 			st->outfile.path = NULL;
 		}
