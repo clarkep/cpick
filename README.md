@@ -1,6 +1,6 @@
 # QuickPick: a color picker
 
-QuickPick is a simple RGB and HSV color picker that can write color values to files.
+QuickPick is an RGB and HSV color picker that can live-edit color values in text files.
 
 ![screenshot](quickpick.png)
 
@@ -14,10 +14,11 @@ or without an output file,
 
      $ quickpick
 
-The central square shows a 2d slice of the RGB color space, and the slider
-moves the slice in the third dimension.
+The central square shows a 2d slice of the RGB color space, and the slider moves the slice in the third dimension.
 
-Click on the buttons in the bottom left to rotate dimensions, and click anywhere on the central square to select a color. If using an output file, the selected color will be automatically written to the specified byte offset.
+Click on the buttons in the bottom left to rotate dimensions, and click anywhere on the central square to select a color.
+You can also modify the current color by dragging a number label, or by selecting one and typing a new value.
+If using an output file, the selected color will be automatically written to the output file at the specified byte offset.
 
 Building
 --------
