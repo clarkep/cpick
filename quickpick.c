@@ -21,6 +21,7 @@ License: GPL 3(see LICENSE)
 #include <rlgl.h>
 
 #include "font/noto_sans_mono.h"
+#include "quickpick_icon.h"
 #include "shapes.h"
 
 #define WRITE_INTERVAL 1.0
@@ -703,9 +704,9 @@ float luminance(unsigned int r, unsigned int g, unsigned int b)
   float rf = r / 255.0f;
   float gf = g / 255.0f;
   float bf = b / 255.0f;
-  float rs = rf <= 0.3928f ? rf / 12.92 : powf((rf+0.055f)/1.055f, 2.4f);
-  float gs = gf <= 0.3928f ? gf / 12.92 : powf((gf+0.055f)/1.055f, 2.4f);
-  float bs = bf <= 0.3928f ? bf / 12.92 : powf((bf+0.055f)/1.055f, 2.4f);
+  float rs = rf <= 0.3928f ? rf / 12.92f : powf((rf+0.055f)/1.055f, 2.4f);
+  float gs = gf <= 0.3928f ? gf / 12.92f : powf((gf+0.055f)/1.055f, 2.4f);
+  float bs = bf <= 0.3928f ? bf / 12.92f : powf((bf+0.055f)/1.055f, 2.4f);
   return 0.2126f * rs + 0.7152f * gs + 0.0722f * bs;
 }
 
@@ -1191,6 +1192,8 @@ int main(int argc, char *argv[])
 	SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_MSAA_4X_HINT);
 	SetTraceLogLevel(LOG_WARNING);
 	InitWindow(st->screenWidth, st->screenHeight, "QuckPick");
+	Image icon = LoadImageFromMemory(".png", quickpick_icon_png, quickpick_icon_png_len);
+	SetWindowIcon(icon);
 	SetExitKey(KEY_NULL);
 	st->hsv_grad_shader = LoadShaderFromMemory(NULL, hsv_grad_fragshader);
 
