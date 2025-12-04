@@ -1204,6 +1204,11 @@ int main(int argc, char *argv[])
 		int maxlen = 5 + (int) strlen(st->outfile.path) + 3 + 20 + 1;
 		char *spath = (char *) malloc(maxlen);
 		int n = snprintf(spath, maxlen, "out: %s @ %llu", st->outfile.path, st->outfile.offset);
+
+		char *window_title = malloc(n + 12);
+		snprintf(window_title, n+12, "%s@%llu - QuickPick", st->outfile.path, st->outfile.offset);
+		SetWindowTitle(window_title); // don't shorten window title
+
 		int str_n = MIN(maxlen-1, n);
 		// Todo: expand based on window size
 		int max_chars = 46;
