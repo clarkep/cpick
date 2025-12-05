@@ -326,6 +326,7 @@ char *hsv_grad_fragshader =
 "#version 330\n"
 "in vec2 fragTexCoord;\n"
 "in vec4 fragColor;\n"
+"out vec4 FragColor;\n"
 "vec3 hsv2rgb(vec3 c)\n"
 "{\n"
 "    vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);\n"
@@ -334,7 +335,7 @@ char *hsv_grad_fragshader =
 "}"
 "void main()\n"
 "{\n"
-"	gl_FragColor = vec4(hsv2rgb(fragColor.xyz), 1.0);\n"
+"	FragColor = vec4(hsv2rgb(fragColor.xyz), 1.0);\n"
 "}\n";
 
 void draw_gradient_square_hsv(struct state *st, int x, int y, int size, int which_fixed,
@@ -1197,7 +1198,12 @@ int main(int argc, char *argv[])
 	SetExitKey(KEY_NULL);
 	st->hsv_grad_shader = LoadShaderFromMemory(NULL, hsv_grad_fragshader);
 
+// XX skip DPI handling on mac for now
+#ifdef __APPLE__
+	st->dpi = 1.0f;
+#else
 	st->dpi = GetWindowScaleDPI().x;
+#endif
 	init_for_dpi(st, st->dpi, 1);
 
 	if (st->outfile.path) {
@@ -1239,7 +1245,12 @@ int main(int argc, char *argv[])
 	SetTargetFPS(60);
 	while (!WindowShouldClose())
 	{
+// XX skip DPI handling on mac for now
+#ifdef __APPLE__
+		float new_dpi = 1.0f;
+#else
 		float new_dpi = GetWindowScaleDPI().x;
+#endif
 		if (new_dpi != st->dpi) {
 			init_for_dpi(st, new_dpi, st->dpi);
 		}
