@@ -17,14 +17,45 @@ License: GPL 3(see LICENSE)
 #include <assert.h>
 #include <errno.h>
 #include <math.h> // round
-#include <raylib.h>
-#include <rlgl.h>
+#include <stdbool.h>
+// #include <raylib.h>
+// #include <rlgl.h>
+
+#include <SDL2/SDL.h>
+#include <SDL2/SDL_ttf.h>
+#include <GL/glew.h>
 
 #include "font/noto_sans_mono.h"
 #include "quickpick_icon.h"
-#include "shapes.h"
+// #include "shapes.h"
 
 #define WRITE_INTERVAL 1.0
+
+/**************/
+
+#define MIN(x, y) ((x) <= (y) ? (x) : (y))
+#define MAX(x, y) ((x) > (y) ? (x) : (y))
+#define CLAMP(x, min, max) ((x) < (min) ? (min) : ((x) > (max) ? (max) : (x)))
+
+// XX Basic types to replace Raylib types
+typedef struct { float x, y; } Vector2;
+typedef struct { float x, y, z; } Vector3;
+typedef struct { unsigned char r, g, b, a; } Color;
+typedef struct { float x, y, width, height; } Rectangle;
+
+#define WHITE ((Color){255, 255, 255, 255})
+#define BLACK ((Color){0, 0, 0, 255})
+
+// Key codes matching SDL scancodes we care about
+#define KEY_ZERO SDL_SCANCODE_0
+#define KEY_NINE SDL_SCANCODE_9
+#define KEY_KP_0 SDL_SCANCODE_KP_0
+#define KEY_KP_9 SDL_SCANCODE_KP_9
+#define KEY_BACKSPACE SDL_SCANCODE_BACKSPACE
+#define KEY_ESCAPE SDL_SCANCODE_ESCAPE
+#define KEY_ENTER SDL_SCANCODE_RETURN
+
+/*****************/
 
 enum cursor_state { CURSOR_UP, CURSOR_START, CURSOR_DOWN, CURSOR_STOP };
 
@@ -38,8 +69,8 @@ typedef struct state {
 	enum cursor_state cursor_state;
 	bool square_dragging;
 	bool val_slider_dragging;
-	// these two represent the same thing...
-	float fixed_value; // 0-1
+	// The coordinate that that the slider controls, 0-1
+	float fixed_value;
 	// the other two dims, usually x and y but can be theta/r when fixed=value.
 	float x_value;
 	float y_value;
@@ -52,15 +83,21 @@ typedef struct state {
 	bool from_alternate_value;
 	Vector3 alternate_value;
 	Color text_color;
-	Font text_font_small;
+	// Font text_font_small;
 	// xx variable width fonts...
-	Font text_font_medium;
-	Font text_font_large;
+	// Font text_font_medium;
+	// Font text_font_large;
+	TTF_Font *text_font_small;
+	TTF_Font *text_font_medium;
+	TTF_Font *text_font_large;
 	int small_char_width;
 	int medium_char_width;
 	int large_char_width;
 	int medium_label_width;
-	Shader hsv_grad_shader;
+	// Shader hsv_grad_shader;
+	GLuint hsv_grad_shader;
+	SDL_Window *window;
+	SDL_GLContext gl_context;
 	struct {
 		char *path;
 		char *shortened_path;
@@ -71,6 +108,12 @@ typedef struct state {
 		double last_write_time;
 	} outfile;
 	bool debug;
+	// XX Input state
+	int mouse_x, mouse_y;
+	bool mouse_down;
+	bool mouse_was_down;
+	int key_pressed;
+	Uint32 start_ticks;
 } State;
 
 typedef struct tab_select
@@ -119,6 +162,323 @@ typedef struct number_select {
 } Number_Select;
 
 char *color_strings[2][3] = { "R", "G", "B", "H", "S", "V" };
+
+/*************************************** CC stuff *************************************************/
+
+// Color utility functions
+Color GetColor(unsigned int hex) {
+	return (Color){
+		(hex >> 24) & 0xFF,
+		(hex >> 16) & 0xFF,
+		(hex >> 8) & 0xFF,
+		hex & 0xFF
+	};
+}
+
+Color ColorBrightness(Color c, float factor) {
+	int r = c.r + (int)(255 * factor);
+	int g = c.g + (int)(255 * factor);
+	int b = c.b + (int)(255 * factor);
+	return (Color){
+		(unsigned char)CLAMP(r, 0, 255),
+		(unsigned char)CLAMP(g, 0, 255),
+		(unsigned char)CLAMP(b, 0, 255),
+		c.a
+	};
+}
+
+Vector3 ColorToHSV(Color c) {
+	float r = c.r / 255.0f;
+	float g = c.g / 255.0f;
+	float b = c.b / 255.0f;
+
+	float max = MAX(MAX(r, g), b);
+	float min = MIN(MIN(r, g), b);
+	float delta = max - min;
+
+	Vector3 hsv;
+	hsv.z = max; // Value
+
+	if (delta < 0.00001f) {
+		hsv.x = 0;
+		hsv.y = 0;
+		return hsv;
+	}
+
+	hsv.y = (max > 0) ? (delta / max) : 0; // Saturation
+
+	if (r >= max) {
+		hsv.x = (g - b) / delta;
+	} else if (g >= max) {
+		hsv.x = 2.0f + (b - r) / delta;
+	} else {
+		hsv.x = 4.0f + (r - g) / delta;
+	}
+
+	hsv.x *= 60.0f;
+	if (hsv.x < 0) hsv.x += 360.0f;
+
+	return hsv;
+}
+
+Color ColorFromHSV(float h, float s, float v) {
+	float c = v * s;
+	float x = c * (1 - fabsf(fmodf(h / 60.0f, 2) - 1));
+	float m = v - c;
+
+	float r, g, b;
+	if (h < 60) { r = c; g = x; b = 0; }
+	else if (h < 120) { r = x; g = c; b = 0; }
+	else if (h < 180) { r = 0; g = c; b = x; }
+	else if (h < 240) { r = 0; g = x; b = c; }
+	else if (h < 300) { r = x; g = 0; b = c; }
+	else { r = c; g = 0; b = x; }
+
+	return (Color){
+		(unsigned char)((r + m) * 255),
+		(unsigned char)((g + m) * 255),
+		(unsigned char)((b + m) * 255),
+		255
+	};
+}
+
+bool CheckCollisionPointRec(Vector2 point, Rectangle rec) {
+	return point.x >= rec.x && point.x <= rec.x + rec.width &&
+	       point.y >= rec.y && point.y <= rec.y + rec.height;
+}
+
+bool CheckCollisionPointCircle(Vector2 point, Vector2 center, float radius) {
+	float dx = point.x - center.x;
+	float dy = point.y - center.y;
+	return (dx*dx + dy*dy) <= (radius * radius);
+}
+
+double GetTime(State *st) {
+	return (SDL_GetTicks() - st->start_ticks) / 1000.0;
+}
+
+Vector2 GetMousePosition(State *st) {
+	return (Vector2){st->mouse_x, st->mouse_y};
+}
+
+// OpenGL drawing functions
+void DrawRectangle(int x, int y, int w, int h, Color c) {
+	glColor4ub(c.r, c.g, c.b, c.a);
+	glBegin(GL_QUADS);
+	glVertex2f(x, y);
+	glVertex2f(x + w, y);
+	glVertex2f(x + w, y + h);
+	glVertex2f(x, y + h);
+	glEnd();
+}
+
+void DrawRectangleLines(int x, int y, int w, int h, Color c) {
+	glColor4ub(c.r, c.g, c.b, c.a);
+	glBegin(GL_LINE_LOOP);
+	glVertex2f(x, y);
+	glVertex2f(x + w, y);
+	glVertex2f(x + w, y + h);
+	glVertex2f(x, y + h);
+	glEnd();
+}
+
+void DrawLine(int x1, int y1, int x2, int y2, Color c) {
+	glColor4ub(c.r, c.g, c.b, c.a);
+	glBegin(GL_LINES);
+	glVertex2f(x1, y1);
+	glVertex2f(x2, y2);
+	glEnd();
+}
+
+void DrawLineEx(Vector2 start, Vector2 end, float thick, Color c) {
+	float dx = end.x - start.x;
+	float dy = end.y - start.y;
+	float len = sqrtf(dx*dx + dy*dy);
+	if (len < 0.001f) return;
+
+	float nx = -dy / len * thick / 2;
+	float ny = dx / len * thick / 2;
+
+	glColor4ub(c.r, c.g, c.b, c.a);
+	glBegin(GL_QUADS);
+	glVertex2f(start.x + nx, start.y + ny);
+	glVertex2f(start.x - nx, start.y - ny);
+	glVertex2f(end.x - nx, end.y - ny);
+	glVertex2f(end.x + nx, end.y + ny);
+	glEnd();
+}
+
+void DrawCircleLines(int cx, int cy, float radius, Color c) {
+	glColor4ub(c.r, c.g, c.b, c.a);
+	glBegin(GL_LINE_LOOP);
+	for (int i = 0; i < 36; i++) {
+		float angle = i * 2 * M_PI / 36;
+		glVertex2f(cx + cosf(angle) * radius, cy + sinf(angle) * radius);
+	}
+	glEnd();
+}
+
+void DrawCircleV(Vector2 center, float radius, Color c) {
+	glColor4ub(c.r, c.g, c.b, c.a);
+	glBegin(GL_TRIANGLE_FAN);
+	glVertex2f(center.x, center.y);
+	for (int i = 0; i <= 36; i++) {
+		float angle = i * 2 * M_PI / 36;
+		glVertex2f(center.x + cosf(angle) * radius, center.y + sinf(angle) * radius);
+	}
+	glEnd();
+}
+
+void DrawRing(Vector2 center, float innerRadius, float outerRadius, float startAngle, float endAngle, int segments, Color c) {
+	glColor4ub(c.r, c.g, c.b, c.a);
+	float step = (endAngle - startAngle) / segments;
+	glBegin(GL_QUAD_STRIP);
+	for (int i = 0; i <= segments; i++) {
+		float angle = (startAngle + i * step) * M_PI / 180.0f;
+		glVertex2f(center.x + cosf(angle) * innerRadius, center.y - sinf(angle) * innerRadius);
+		glVertex2f(center.x + cosf(angle) * outerRadius, center.y - sinf(angle) * outerRadius);
+	}
+	glEnd();
+}
+
+void DrawRectangleGradientEx(Rectangle rec, Color col1, Color col2, Color col3, Color col4) {
+	// col1=bottom-left, col2=bottom-right, col3=top-right, col4=top-left
+	glBegin(GL_QUADS);
+	glColor4ub(col4.r, col4.g, col4.b, col4.a);
+	glVertex2f(rec.x, rec.y);
+	glColor4ub(col3.r, col3.g, col3.b, col3.a);
+	glVertex2f(rec.x + rec.width, rec.y);
+	glColor4ub(col2.r, col2.g, col2.b, col2.a);
+	glVertex2f(rec.x + rec.width, rec.y + rec.height);
+	glColor4ub(col1.r, col1.g, col1.b, col1.a);
+	glVertex2f(rec.x, rec.y + rec.height);
+	glEnd();
+}
+
+// Text rendering with SDL_ttf + OpenGL texture
+typedef struct {
+	GLuint texture;
+	int w, h;
+} TextTexture;
+
+TextTexture RenderTextToTexture(TTF_Font *font, const char *text, Color c) {
+	TextTexture result = {0, 0, 0};
+	if (!text || !text[0]) return result;
+
+	SDL_Color sdl_color = {c.r, c.g, c.b, c.a};
+	SDL_Surface *surface = TTF_RenderUTF8_Blended(font, text, sdl_color);
+	if (!surface) return result;
+
+	// Convert to RGBA
+	SDL_Surface *rgba_surface = SDL_ConvertSurfaceFormat(surface, SDL_PIXELFORMAT_RGBA32, 0);
+	SDL_FreeSurface(surface);
+	if (!rgba_surface) return result;
+
+	glGenTextures(1, &result.texture);
+	glBindTexture(GL_TEXTURE_2D, result.texture);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, rgba_surface->w, rgba_surface->h, 0,
+	             GL_RGBA, GL_UNSIGNED_BYTE, rgba_surface->pixels);
+
+	result.w = rgba_surface->w;
+	result.h = rgba_surface->h;
+	SDL_FreeSurface(rgba_surface);
+
+	return result;
+}
+
+void DrawTextEx(State *st, TTF_Font *font, const char *text, Vector2 pos, Color c) {
+	if (!text || !text[0]) return;
+
+	TextTexture tex = RenderTextToTexture(font, text, c);
+	if (!tex.texture) return;
+
+	glEnable(GL_TEXTURE_2D);
+	glBindTexture(GL_TEXTURE_2D, tex.texture);
+	glColor4f(1, 1, 1, 1);
+
+	glBegin(GL_QUADS);
+	glTexCoord2f(0, 0); glVertex2f(pos.x, pos.y);
+	glTexCoord2f(1, 0); glVertex2f(pos.x + tex.w, pos.y);
+	glTexCoord2f(1, 1); glVertex2f(pos.x + tex.w, pos.y + tex.h);
+	glTexCoord2f(0, 1); glVertex2f(pos.x, pos.y + tex.h);
+	glEnd();
+
+	glDisable(GL_TEXTURE_2D);
+	glDeleteTextures(1, &tex.texture);
+}
+
+Vector2 MeasureTextEx(TTF_Font *font, const char *text, float size, float spacing) {
+	if (!font || !text || !text[0]) return (Vector2){0, 0};
+	int w, h;
+	TTF_SizeUTF8(font, text, &w, &h);
+	return (Vector2){w, h};
+}
+
+// Shader functions
+static const char *hsv_grad_vertex_shader =
+	"#version 120\n"
+	"void main() {\n"
+	"    gl_Position = gl_ModelViewProjectionMatrix * gl_Vertex;\n"
+	"    gl_FrontColor = gl_Color;\n"
+	"}\n";
+
+static const char *hsv_grad_fragment_shader =
+	"#version 120\n"
+	"vec3 hsv2rgb(vec3 c) {\n"
+	"    vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);\n"
+	"    vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);\n"
+	"    return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);\n"
+	"}\n"
+	"void main() {\n"
+	"    gl_FragColor = vec4(hsv2rgb(gl_Color.xyz), 1.0);\n"
+	"}\n";
+
+GLuint compile_shader(GLenum type, const char *source) {
+	GLuint shader = glCreateShader(type);
+	glShaderSource(shader, 1, &source, NULL);
+	glCompileShader(shader);
+
+	GLint success;
+	glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
+	if (!success) {
+		char log[512];
+		glGetShaderInfoLog(shader, 512, NULL, log);
+		fprintf(stderr, "Shader compilation failed: %s\n", log);
+	}
+	return shader;
+}
+
+GLuint create_shader_program(const char *vert_src, const char *frag_src) {
+	GLuint vert = compile_shader(GL_VERTEX_SHADER, vert_src);
+	GLuint frag = compile_shader(GL_FRAGMENT_SHADER, frag_src);
+
+	GLuint program = glCreateProgram();
+	glAttachShader(program, vert);
+	glAttachShader(program, frag);
+	glLinkProgram(program);
+
+	GLint success;
+	glGetProgramiv(program, GL_LINK_STATUS, &success);
+	if (!success) {
+		char log[512];
+		glGetProgramInfoLog(program, 512, NULL, log);
+		fprintf(stderr, "Shader linking failed: %s\n", log);
+	}
+
+	glDeleteShader(vert);
+	glDeleteShader(frag);
+	return program;
+}
+
+TTF_Font *load_font_from_memory(unsigned char *data, int len, int size) {
+	SDL_RWops *rw = SDL_RWFromMem(data, len);
+	TTF_Font *font = TTF_OpenFontRW(rw, 1, size - 5);
+	return font;
+}
+
+/**************************************************************************************************/
 
 void errexit(char *fmt, ...) {
 	va_list args;
@@ -319,7 +679,7 @@ void draw_gradient_square_rgb(int x, int y, int size, int which_fixed, float fix
 		}
 	}
 	Rectangle rec = { x, y, size, size };
-	DrawRectangleGradientEx(rec, corner_cols[2], corner_cols[0], corner_cols[1], corner_cols[3]);
+	DrawRectangleGradientEx(rec, corner_cols[0], corner_cols[1], corner_cols[3], corner_cols[2]);
 }
 
 char *hsv_grad_fragshader =
@@ -357,33 +717,37 @@ void draw_gradient_square_hsv(struct state *st, int x, int y, int size, int whic
 		}
 	}
 	Rectangle rec = { x, y, size, size };
-	BeginShaderMode(st->hsv_grad_shader);
-	DrawRectangleGradientEx(rec, corner_cols[2], corner_cols[0], corner_cols[1], corner_cols[3]);
-	EndShaderMode();
+	// BeginShaderMode(st->hsv_grad_shader);
+	glUseProgram(st->hsv_grad_shader);
+	DrawRectangleGradientEx(rec, corner_cols[0], corner_cols[1], corner_cols[3], corner_cols[2]);
+	// EndShaderMode();
+	glUseProgram(0);
 }
 
 void draw_gradient_circle_and_axes(int x, int y, int r, float fixed_val, struct state *st)
 {
-	BeginShaderMode(st->hsv_grad_shader);
-    rlBegin(RL_TRIANGLES);
+	// BeginShaderMode(st->hsv_grad_shader);
+    // rlBegin(RL_TRIANGLES);
+	glUseProgram(st->hsv_grad_shader);
+	glBegin(GL_TRIANGLES);
         for (int i = 0; i < 255; i += 1)
         {
-			float ang = (i / 255.0f) * 2 * PI;
-			float ang2 = ((i+1) / 255.0f) * 2 * PI;
-            rlColor4ub(i, 0, fixed_val*255.0f, 255);
-            rlVertex2f(x, y);
-            rlColor4ub(i, 255, fixed_val*255.0f, 255);
-            rlVertex2f(x + cosf(ang)*r, y - sinf(ang)*r);
-            rlColor4ub(i+1, 255, fixed_val*255.0f, 255);
-            rlVertex2f(x + cosf(ang2)*r, y - sinf(ang2)*r);
+			float ang = (i / 255.0f) * 2 * M_PI;
+			float ang2 = ((i+1) / 255.0f) * 2 * M_PI;
+            glColor4ub(i, 0, fixed_val*255.0f, 255);
+            glVertex2f(x, y);
+            glColor4ub(i, 255, fixed_val*255.0f, 255);
+            glVertex2f(x + cosf(ang)*r, y - sinf(ang)*r);
+            glColor4ub(i+1, 255, fixed_val*255.0f, 255);
+            glVertex2f(x + cosf(ang2)*r, y - sinf(ang2)*r);
         }
-    rlEnd();
-    EndShaderMode();
+    glEnd();
+    glUseProgram(0);
 	// tick marks
 	float dpi = st->dpi;
 	for (float ang=0.0f; ang<360.0f; ang+=30.0) {
-		float dx = cosf(ang*2*PI/360.0f);
-		float dy = sinf(ang*2*PI/360.0f);
+		float dx = cosf(ang*2*M_PI/360.0f);
+		float dy = sinf(ang*2*M_PI/360.0f);
 		int length = 5*dpi;
 		Vector2 start = { x + r * dx, y + r * dy };
 		Vector2 end = { start.x + length * dx, start.y + length * dy };
@@ -395,7 +759,7 @@ void draw_gradient_circle_and_axes(int x, int y, int r, float fixed_val, struct 
 	// int  = 4*dpi;
 	// arrowhead
 	float ah_len = 13*dpi;
-	float ah_ang = (180-28)*2*PI/360.0f;
+	float ah_ang = (180-28)*2*M_PI/360.0f;
 	float ah_w = 2.0*dpi;
 	Vector2 arrow_end = (Vector2) { x+r+arrow_len, y};
 	DrawLineEx((Vector2) {x+r+12*dpi, y}, arrow_end, arrow_w, st->text_color);
@@ -403,19 +767,18 @@ void draw_gradient_circle_and_axes(int x, int y, int r, float fixed_val, struct 
 	Vector2 ah_right = { arrow_end.x + ah_len*cosf(-ah_ang), arrow_end.y + ah_len*sinf(-ah_ang)};
 	DrawLineEx(arrow_end, ah_left, ah_w, st->text_color);
 	DrawLineEx(arrow_end, ah_right, ah_w, st->text_color);
-	DrawTextEx(st->text_font_small, "S",
-			   (Vector2) {arrow_end.x-16.0*dpi, arrow_end.y-31.0*dpi}, 22*dpi, 2.*dpi,
-			   st->text_color);
+	DrawTextEx(st, st->text_font_small, "S",
+			   (Vector2) {arrow_end.x-16.0*dpi, arrow_end.y-31.0*dpi}, st->text_color);
 	// h arrow
 	float harr_d = 30*dpi;
 	float harr_w = 2*dpi;
 	float harr_ang1 = 12;
 	float harr_ang2 = 28;
-	Vector2 harr_end = { x + (r+harr_d+harr_w/2)*cosf(2*PI*harr_ang2/360.0f),
-		y - (r+harr_d+harr_w/2)*sinf(2*PI*harr_ang2/360.0f) };
-	float harr_dir_ang = (harr_ang2*2*PI / 360.0f) + PI / 2;
+	Vector2 harr_end = { x + (r+harr_d+harr_w/2)*cosf(2*M_PI*harr_ang2/360.0f),
+		y - (r+harr_d+harr_w/2)*sinf(2*M_PI*harr_ang2/360.0f) };
+	float harr_dir_ang = (harr_ang2*2*M_PI / 360.0f) + M_PI / 2;
 	// arrowhead
-	float adj = 2*PI/120;
+	float adj = 2*M_PI/120;
 	// xx angles are set up so that left arrowhead goes straight down, but still looks a bit janky
 		Vector2 h_ah_left = { harr_end.x /*+ah_len*cosf(harr_dir_ang+ah_ang+adj)*/,
 		harr_end.y-ah_len*sinf(harr_dir_ang+ah_ang+adj)};
@@ -424,9 +787,9 @@ void draw_gradient_circle_and_axes(int x, int y, int r, float fixed_val, struct 
 	Color c3 = st->text_color;
 	DrawLineEx(harr_end, h_ah_left, ah_w, c3);
 	DrawLineEx(harr_end, h_ah_right, ah_w, c3);
-	DrawTextEx(st->text_font_small, "H",
-		(Vector2) {harr_end.x+18*dpi, harr_end.y-2*dpi}, 22*dpi, 2.*dpi, st->text_color);
-	DrawRing((Vector2){x,y}, r+harr_d, r+harr_d+harr_w, -harr_ang1, -harr_ang2, 30, st->text_color);
+	DrawTextEx(st, st->text_font_small, "H", (Vector2) {harr_end.x+18*dpi, harr_end.y-2*dpi},
+		st->text_color);
+	DrawRing((Vector2){x,y}, r+harr_d, r+harr_d+harr_w, harr_ang1, harr_ang2, 30, st->text_color);
 	// Color c2 = { 255, 0, 0, 255 };
 	// DrawPixelV(harr_end, c2);
 }
@@ -440,7 +803,7 @@ void draw_axes(int x, int y, int w, int h, struct state *st)
 	int y_tick_len = w/4;
 	int x_tick_len = h/4;
 	Color tick_color = st->text_color;
-	int label_size = 30*dpi;
+	int label_size = 30*dpi; // XX this was the medium font size, but has changed?
 	Color label_color = st->text_color;
 
 	// x axis label
@@ -453,12 +816,11 @@ void draw_axes(int x, int y, int w, int h, struct state *st)
 		x_label = color_strings[1][0];
 		y_label = color_strings[1][2];
 	}
-	DrawTextEx(st->text_font_medium, x_label,
-			   (Vector2) {x + 512*dpi/2 - label_size, y + 512*dpi + h - label_size}, label_size,
-			   2.*dpi, label_color);
+	DrawTextEx(st, st->text_font_medium, x_label,
+			   (Vector2) {x + 512*dpi/2 - label_size, y + 512*dpi + h - label_size}, label_color);
 	// y axis label
-	DrawTextEx(st->text_font_medium, y_label,
-			   (Vector2) {x - h, y + 512*dpi/2 - label_size}, label_size, 2.*dpi, label_color);
+	DrawTextEx(st, st->text_font_medium, y_label,
+			   (Vector2) {x - h, y + 512*dpi/2 - label_size}, label_color);
 	// x axis
 	for (int ix = x; ix < (x+512*dpi); ix += tick_sep) {
 		DrawRectangle(ix, y+512*dpi, tick_width, x_tick_len, tick_color);
@@ -494,26 +856,30 @@ bool tab_select(Tab_Select *self, Vector2 pos, enum cursor_state cs)
 	float y = self->top ? self->y : self->y - off;
 	float h = self->h + off;
 	// XX y-1, h+1 to correct for RoundedLines bulge
-	DrawRectangleRounded((Rectangle) { x, y-(int)self->top, tw + off, h+1}, rnd, segs, color1);
-	DrawRectangleRoundedLines((Rectangle) { x, y, tw +off, h }, rnd, segs, self->border_color);
+	// DrawRectangleRounded((Rectangle) { x, y-(int)self->top, tw + off, h+1}, rnd, segs, color1);
+	// DrawRectangleRoundedLines((Rectangle) { x, y, tw +off, h }, rnd, segs, self->border_color);
+	DrawRectangle(x, y, tw + off, h, color1);
+	DrawRectangleLines(x, y, tw + off, h, self->border_color);
 	text[0] = self->labels[0];
-	DrawTextEx(st->text_font_small, text, (Vector2) {x + (tw - st->small_char_width)/2.0,
-		self->y + (self->h-22*dpi)/2.0 }, 22*dpi, 2*dpi, text_color1);
+	DrawTextEx(st, st->text_font_small, text, (Vector2) {x + (tw - st->small_char_width)/2.0,
+		self->y + (self->h-22*dpi)/2.0 }, text_color1);
 	float x_mid = x + tw;
 	int last_x = x_mid + tw;
 	int end_x = self->x + self->w;
 	int last_w = end_x - last_x;
-	DrawRectangleRounded((Rectangle) { last_x - off, y-(int)self->top, last_w + off, h+1}, rnd, segs, color3);
-	DrawRectangleRoundedLines((Rectangle) { last_x - off, y, last_w + off, h }, rnd, segs, self->border_color);
+	// DrawRectangleRounded((Rectangle) { last_x - off, y-(int)self->top, last_w + off, h+1}, rnd, segs, color3);
+	// DrawRectangleRoundedLines((Rectangle) { last_x - off, y, last_w + off, h }, rnd, segs, self->border_color);
+	DrawRectangle(last_x - off, y, last_w + off, h, color3);
+	DrawRectangleLines(last_x - off, y, last_w + off, h, self->border_color);
 	text[0] = self->labels[2];
-	DrawTextEx(st->text_font_small, text, (Vector2) {last_x + (last_w - st->small_char_width)/2.0,
-		self->y + (self->h-22*dpi)/2.0 }, 22*dpi, 2*dpi, text_color3);
+	DrawTextEx(st, st->text_font_small, text, (Vector2) {last_x + (last_w - st->small_char_width)/2.0,
+		self->y + (self->h-22*dpi)/2.0 }, text_color3);
 
 	DrawRectangle(x_mid, self->y-(int)self->top, tw, self->h+1, color2);
 	DrawRectangleLines(x_mid, self->y-(int)self->top, tw, self->h+1, self->border_color);
 	text[0] = self->labels[1];
-	DrawTextEx(st->text_font_small, text, (Vector2) {x_mid + (tw - st->small_char_width)/2.0,
-		self->y + (self->h-22*dpi)/2.0 }, 22*dpi, 2*dpi, text_color2);
+	DrawTextEx(st, st->text_font_small, text, (Vector2) {x_mid + (tw - st->small_char_width)/2.0,
+		self->y + (self->h-22*dpi)/2.0 }, text_color2);
 
 	bool updated = false;
 	float hover_targets[3] = { 0.0f, 0.0f, 0.0f };
@@ -551,7 +917,8 @@ bool number_select(Number_Select *self, Vector2 pos, enum cursor_state cs, int k
 	Color hl_color = { a, a, a, self->shade_v };
 
 	bool hovered = false;
-	DrawRectangleRounded((Rectangle) { self->x - 10*dpi, self->y, self->w, self->h }, 0.5f, 30, hl_color);
+	// DrawRectangleRounded((Rectangle) { self->x - 10*dpi, self->y, self->w, self->h }, 0.5f, 30, hl_color);
+	DrawRectangle(self->x - 10*dpi, self->y, self->w, self->h, hl_color);
 	char text[21];
 	memset(text, 0, 21);
 	if (self->input_active) {
@@ -581,20 +948,19 @@ bool number_select(Number_Select *self, Vector2 pos, enum cursor_state cs, int k
 		int x = self->x;
 		char c = text[d_i];
 		text[d_i] = '\0';
-		DrawTextEx(st->text_font_medium, text, (Vector2) { x, self->y }, 30*dpi, 1.5*dpi,
-			st->text_color);
+		DrawTextEx(st, st->text_font_medium, text, (Vector2) { x, self->y }, st->text_color);
 		text[d_i] = c;
 		x += d_i*(st->medium_char_width + 1.5*dpi);
 		c = text[d_i + d_chars];
-		DrawTextEx(st->text_font_medium, &text[d_i], (Vector2) { x, self->y }, 30*dpi, 1.5*dpi,
+		DrawTextEx(st, st->text_font_medium, &text[d_i], (Vector2) { x, self->y },
 			st->text_color.r < 128 ? GetColor(0x303030ff) : GetColor(0xd8d8d8ff));
 		text[d_i + d_chars] = c;
 		x += d_chars * (st->medium_char_width + 1.5*dpi);
-		DrawTextEx(st->text_font_medium, &text[d_i+d_chars], (Vector2) { x, self->y }, 30*dpi, 1.5*dpi,
+		DrawTextEx(st, st->text_font_medium, &text[d_i+d_chars], (Vector2) { x, self->y },
 			st->text_color);
 	} else {
 		int n_chars = snprintf(text, 20, self->fmt, self->input_active ? self->input_n : self->value);
-		DrawTextEx(st->text_font_medium, text, (Vector2) { self->x, self->y }, 30*dpi, 1.5*dpi,
+		DrawTextEx(st, st->text_font_medium, text, (Vector2) { self->x, self->y },
 			st->text_color);
 	}
 	bool hit = CheckCollisionPointRec(pos, (Rectangle) { self->x, self->y, self->w, self->h });
@@ -713,7 +1079,7 @@ float luminance(unsigned int r, unsigned int g, unsigned int b)
 
 void draw_ui_and_respond_input(struct state *st)
 {
-	if (IsMouseButtonDown(0)) {
+	if (st->mouse_down) {
 		if (st->cursor_state == CURSOR_UP || st->cursor_state == CURSOR_STOP)
 			st->cursor_state = CURSOR_START;
 		else if (st->cursor_state == CURSOR_START)
@@ -726,18 +1092,19 @@ void draw_ui_and_respond_input(struct state *st)
 		} else if (st->cursor_state == CURSOR_STOP)
 			st->cursor_state = CURSOR_UP;
 	}
-	Vector2 pos = GetMousePosition();
+	Vector2 pos = GetMousePosition(st);
 	// consume one keypress per frame
-	int key = GetKeyPressed();
+	int key = st->key_pressed;
 	float anim_vdt = .3;
 
 	struct color_info ci = current_color(st);
 	Color cur_color = ci.rgb;
 	Vector3 cur_hsv = ci.hsv;
-	ClearBackground( cur_color );
+	// ClearBackground( cur_color );
+	glClearColor(cur_color.r/255.0f, cur_color.g/255.0f, cur_color.b/255.0f, 1.0f);
+	glClear(GL_COLOR_BUFFER_BIT);
 
 	float dpi = st->dpi;
-	// TODO: improve
 	if (luminance(cur_color.r, cur_color.g, cur_color.b) >= 0.179) {
 		st->text_color = BLACK;
 	} else {
@@ -776,9 +1143,9 @@ void draw_ui_and_respond_input(struct state *st)
 	Color out_ind_bgcolor = { 48, 48, 48, 192 };
 	if (st->outfile.path) {
 		int text_x = out_ind_bottom_x + (out_ind_bottom_w - st->outfile.shortened_path_len*(st->small_char_width+1.0*dpi))/2.0f;
-		draw_rounded_quadrilateral(out_ind_verts, out_ind_rounded, 12*dpi, 12, out_ind_bgcolor);
-		DrawTextEx(st->text_font_small, st->outfile.shortened_path, (Vector2) { text_x, out_ind_top_y + 3*dpi },
-			22*dpi, 1.0*dpi, WHITE);
+		// draw_rounded_quadrilateral(out_ind_verts, out_ind_rounded, 12*dpi, 12, out_ind_bgcolor);
+		DrawTextEx(st, st->text_font_small, st->outfile.shortened_path,
+			(Vector2) { text_x, out_ind_top_y + 3*dpi }, WHITE);
 	}
 
 	// gradient
@@ -814,8 +1181,8 @@ void draw_ui_and_respond_input(struct state *st)
 		ind_x = grad_square_x + st->x_value * (512*dpi);
 		ind_y = grad_square_y + 512*dpi - st->y_value * (512*dpi);
 	} else {
-		ind_x = cx + cr*st->y_value*cosf(st->x_value * 2*PI);
-		ind_y = cy - cr*st->y_value*sinf(st->x_value * 2*PI);
+		ind_x = cx + cr*st->y_value*cosf(st->x_value * 2*M_PI);
+		ind_y = cy - cr*st->y_value*sinf(st->x_value * 2*M_PI);
 	}
 	DrawCircleLines(ind_x, ind_y, 6*dpi, st->text_color);
 	int r2 = 4*dpi;
@@ -825,7 +1192,6 @@ void draw_ui_and_respond_input(struct state *st)
 	DrawLine(ind_x, ind_y - r3, ind_x, ind_y - r2, st->text_color);
 	DrawLine(ind_x, ind_y + r2, ind_x, ind_y + r3, st->text_color);
 	if (st->cursor_state == CURSOR_START || st->square_dragging) {
-		Vector2 pos = GetMousePosition();
 		if (!st->square_dragging) {
 			Rectangle rec = {grad_square_x, grad_square_y, 512*dpi, 512*dpi};
 			Vector2 c = { grad_square_x + 512*dpi/2, grad_square_y + 512*dpi/2 };
@@ -846,7 +1212,7 @@ void draw_ui_and_respond_input(struct state *st)
 				int y_res = pos.y - y_adj - (grad_square_y + 512*dpi/2);
 				y_res = -y_res;
 				// theta
-				st->x_value = atan2(y_res, x_res) / (2*PI);
+				st->x_value = atan2(y_res, x_res) / (2*M_PI);
 				st->x_value = st->x_value < 0 ? 1.0 + st->x_value : st->x_value;
 				// r
 				st->y_value = MIN(MAX(sqrtf(x_res*x_res+y_res*y_res)/(512*dpi/2), 0.0), 1.0);
@@ -942,9 +1308,9 @@ void draw_ui_and_respond_input(struct state *st)
 	// XX x-1, w+2 to correct for Rounded bulge
 	DrawRectangle(ind_button_x-1, ind_button_y, ind_button_w+2, ind_button_h, fixed_button_color);
 	DrawRectangleLines(ind_button_x-1, ind_button_y, ind_button_w+2, ind_button_h, ind_border_color);
-	DrawTextEx(st->text_font_large, color_strings[st->mode][st->which_fixed],
+	DrawTextEx(st, st->text_font_large, color_strings[st->mode][st->which_fixed],
 		(Vector2) {ind_button_x+ind_button_w/2.0f-st->large_char_width/2.0f,
-			ind_button_y+(ind_button_h-40.0f*dpi)/2.0f}, 40.*dpi, 2*dpi, WHITE);
+			ind_button_y+(ind_button_h-40.0f*dpi)/2.0f}, WHITE);
 	if (CheckCollisionPointRec(pos, (Rectangle) { ind_button_x, ind_button_y, ind_button_w,
 		ind_tabs_y-ind_button_y})) {
 		if (st->cursor_state == CURSOR_START) {
@@ -980,8 +1346,6 @@ void draw_ui_and_respond_input(struct state *st)
 		Vector2 circle_center = { val_slider_x + val_slider_offset, val_slider_y };
 		DrawCircleV(circle_center, 15*dpi, fixed_indication_color);
 		if (st->cursor_state == CURSOR_START || st->val_slider_dragging) {
-			TraceLog(LOG_DEBUG, "Received click. dragging: %d", st->val_slider_dragging);
-			Vector2 pos = GetMousePosition();
 			if (!st->val_slider_dragging && CheckCollisionPointRec(pos,
 				(Rectangle) { val_slider_x - circle_r, val_slider_y-val_slider_h/2.0f,
 					val_slider_w+2*circle_r, val_slider_h } )) {
@@ -1035,8 +1399,7 @@ void draw_ui_and_respond_input(struct state *st)
 	sprintf(value, "hex:#%02x%02x%02x", cur_color.r, cur_color.g, cur_color.b);
 	int hex_label_x = b_num_select.x + b_num_select.w;
 	int hex_label_y = r_num_select.y;
-	DrawTextEx(st->text_font_medium, value, (Vector2) {hex_label_x, hex_label_y}, 30.*dpi,
-		1.5*dpi, st->text_color);
+	DrawTextEx(st, st->text_font_medium, value, (Vector2) {hex_label_x, hex_label_y}, st->text_color);
 
 	bool hsv_num_select_changed = false;
 	int hsv_select_w = 7*(st->medium_char_width + 1.5*dpi);
@@ -1076,7 +1439,7 @@ void draw_ui_and_respond_input(struct state *st)
 		printf("rgb and hsv selects changed\n");
 	}
 
-	double now = GetTime();
+	double now = GetTime(st);
 	if (st->outfile.path && now - st->outfile.last_write_time > WRITE_INTERVAL &&
 		!colors_equal(cur_color, st->outfile.last_write_color)) {
 		write_color_to_file(st, cur_color);
@@ -1107,21 +1470,18 @@ void init_for_dpi(struct state *st, float dpi, float old_dpi)
 	int new_target_w = st->screenWidth * ratio;
 	int new_target_h = st->screenHeight * ratio;
 	if (new_target_w  != st->screenWidth) {
-		SetWindowSize(new_target_w, new_target_h);
-		st->screenWidth = GetScreenWidth();
-		st->screenHeight = GetScreenHeight();
+		SDL_SetWindowSize(st->window, new_target_w, new_target_h);
+		st->screenWidth = new_target_w; // GetScreenWidth();
+		st->screenHeight = new_target_h; // GetScreenHeight();
 	}
 
 /*
 	st->text_font_small = LoadFontFromMemory(".ttf", noto_sans_mono_mini_ttf, noto_sans_mono_mini_ttf_len,
 		22*dpi, small_codepoints, sizeof(small_codepoints)/sizeof(int));
 */
-	st->text_font_small = LoadFontFromMemory(".ttf", noto_sans_mono, noto_sans_mono_len,
-		22*dpi, NULL, 0);
-	st->text_font_medium = LoadFontFromMemory(".ttf", noto_sans_mono, noto_sans_mono_len,
-		30*dpi, medium_codepoints, sizeof(medium_codepoints)/sizeof(int));
-	st->text_font_large = LoadFontFromMemory(".ttf", noto_sans_mono, noto_sans_mono_len,
-		40*dpi, large_codepoints, sizeof(large_codepoints)/sizeof(int));
+	st->text_font_small = load_font_from_memory(noto_sans_mono, noto_sans_mono_len, 22*dpi);
+	st->text_font_medium = load_font_from_memory(noto_sans_mono, noto_sans_mono_len, 30*dpi);
+	st->text_font_large = load_font_from_memory(noto_sans_mono, noto_sans_mono_len, 40*dpi);
 
 	// Measure the label width once; since it's a monospace font, it will be the same for all colors.
 	st->medium_label_width = MeasureTextEx(st->text_font_medium, "r:255 g:255 b:255 hex:#ffffff",
@@ -1151,7 +1511,6 @@ int main(int argc, char *argv[])
 	st->outfile.path = NULL;
 	st->outfile.offset = 0;
 	st->outfile.format = 0;
-	st->outfile.last_write_time = GetTime();
 	st->outfile.last_write_color = (Color) { 0, 0, 0, 255 };
 	st->debug = false;
 
@@ -1190,30 +1549,71 @@ int main(int argc, char *argv[])
 	if (st->debug && st->outfile.path) {
 		printf("Outfile: %s\n", st->outfile.path);
 	}
-	SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_MSAA_4X_HINT);
-	SetTraceLogLevel(LOG_WARNING);
-	InitWindow(st->screenWidth, st->screenHeight, "QuckPick");
-	Image icon = LoadImageFromMemory(".png", quickpick_icon_png, quickpick_icon_png_len);
-	SetWindowIcon(icon);
-	SetExitKey(KEY_NULL);
-	st->hsv_grad_shader = LoadShaderFromMemory(NULL, hsv_grad_fragshader);
 
-// XX skip DPI handling on mac for now
-#ifdef __APPLE__
-	st->dpi = 1.0f;
-#else
-	st->dpi = GetWindowScaleDPI().x;
-#endif
+	if (SDL_Init(SDL_INIT_VIDEO) < 0) {
+		errexit("SDL_Init failed: %s\n", SDL_GetError());
+	}
+
+	if (TTF_Init() < 0) {
+		errexit("TTF_Init failed: %s\n", TTF_GetError());
+	}
+
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 1);
+	SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
+	SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 1);
+	SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, 4);
+
+	st->window = SDL_CreateWindow("QuickPick",
+		SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
+		st->screenWidth, st->screenHeight,
+		SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
+	if (!st->window) {
+		errexit("SDL_CreateWindow failed: %s\n", SDL_GetError());
+	}
+
+	// set window icon
+	SDL_RWops *icon_rw = SDL_RWFromMem(quickpick_icon_png, quickpick_icon_png_len);
+	SDL_Surface *icon_surface = SDL_LoadBMP_RW(icon_rw, 1);
+	// Note: PNG loading would require SDL_image, so icon may not work without it
+	// For now we skip icon setting if it fails
+	if (icon_surface) {
+		SDL_SetWindowIcon(st->window, icon_surface);
+		SDL_FreeSurface(icon_surface);
+	}
+
+	st->gl_context = SDL_GL_CreateContext(st->window);
+	if (!st->gl_context) {
+		errexit("SDL_GL_CreateContext failed: %s\n", SDL_GetError());
+	}
+
+	glewExperimental = GL_TRUE;
+	GLenum glew_err = glewInit();
+	if (glew_err != GLEW_OK) {
+		errexit("glewInit failed: %s\n", glewGetErrorString(glew_err));
+	}
+
+	// enable vsync
+	// SDL_GL_SetSwapInterval(1);
+
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+	st->hsv_grad_shader = create_shader_program(hsv_grad_vertex_shader, hsv_grad_fragment_shader);
+
+	int drawable_w, drawable_h;
+	SDL_GL_GetDrawableSize(st->window, &drawable_w, &drawable_h);
+	int window_w, window_h;
+	SDL_GetWindowSize(st->window, &window_w, &window_h);
+	st->dpi = (float)drawable_w / window_w;
+
+	init_for_dpi(st, st->dpi, 1.0f);
 	init_for_dpi(st, st->dpi, 1);
 
 	if (st->outfile.path) {
 		int maxlen = 5 + (int) strlen(st->outfile.path) + 3 + 20 + 1;
 		char *spath = (char *) malloc(maxlen);
 		int n = snprintf(spath, maxlen, "out: %s @ %llu", st->outfile.path, st->outfile.offset);
-
-		char *window_title = malloc(n + 12);
-		snprintf(window_title, n+12, "%s@%llu - QuickPick", st->outfile.path, st->outfile.offset);
-		SetWindowTitle(window_title); // don't shorten window title
 
 		int str_n = MIN(maxlen-1, n);
 		// Todo: expand based on window size
@@ -1242,24 +1642,99 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	SetTargetFPS(60);
-	while (!WindowShouldClose())
+	bool running = true;
+	unsigned long long ticks_start = SDL_GetTicks64();
+	unsigned long long frames = 0;
+	while (running)
 	{
-// XX skip DPI handling on mac for now
-#ifdef __APPLE__
-		float new_dpi = 1.0f;
-#else
-		float new_dpi = GetWindowScaleDPI().x;
-#endif
+		st->key_pressed = 0;
+		st->mouse_was_down = st->mouse_down;
+
+		SDL_Event event;
+		while (SDL_PollEvent(&event)) {
+			switch (event.type) {
+			case SDL_QUIT:
+				running = false;
+				break;
+			case SDL_KEYDOWN:
+				if (event.key.keysym.scancode == SDL_SCANCODE_ESCAPE) {
+					// Don't quit on escape, just pass it through
+				}
+				st->key_pressed = event.key.keysym.scancode;
+				break;
+			case SDL_MOUSEMOTION:
+				st->mouse_x = event.motion.x;
+				st->mouse_y = event.motion.y;
+				break;
+			case SDL_MOUSEBUTTONDOWN:
+				if (event.button.button == SDL_BUTTON_LEFT) {
+					st->mouse_down = true;
+				}
+				break;
+			case SDL_MOUSEBUTTONUP:
+				if (event.button.button == SDL_BUTTON_LEFT) {
+					st->mouse_down = false;
+				}
+				break;
+			case SDL_WINDOWEVENT:
+				if (event.window.event == SDL_WINDOWEVENT_SIZE_CHANGED) {
+					st->screenWidth = event.window.data1;
+					st->screenHeight = event.window.data2;
+				}
+				break;
+			}
+		}
+
+		// Check for DPI changes
+		SDL_GL_GetDrawableSize(st->window, &drawable_w, &drawable_h);
+		SDL_GetWindowSize(st->window, &window_w, &window_h);
+		float new_dpi = (float)drawable_w / window_w;
 		if (new_dpi != st->dpi) {
 			init_for_dpi(st, new_dpi, st->dpi);
 		}
+
+		// Setup viewport and projection
+		glViewport(0, 0, drawable_w, drawable_h);
+		glMatrixMode(GL_PROJECTION);
+		glLoadIdentity();
+		glOrtho(0, st->screenWidth, st->screenHeight, 0, -1, 1);
+		glMatrixMode(GL_MODELVIEW);
+		glLoadIdentity();
+
+		draw_ui_and_respond_input(st);
+
+		SDL_GL_SwapWindow(st->window);
+		// XX measure frame time and subtract
+		SDL_Delay(16);
+
+/*
+		frames++;
+		unsigned long long ticks_now = SDL_GetTicks64();
+		if (ticks_now >= ticks_start + 1000) {
+			printf("FPS: %llu\n", frames);
+			ticks_start = ticks_now;
+			frames = 0;
+		}
+*/
+
+/*
 		st->screenWidth = GetScreenWidth();
 		st->screenHeight = GetScreenHeight();
 		BeginDrawing();
 		draw_ui_and_respond_input(st);
 		EndDrawing();
+*/
     }
+
+	if (st->text_font_small) TTF_CloseFont(st->text_font_small);
+	if (st->text_font_medium) TTF_CloseFont(st->text_font_medium);
+	if (st->text_font_large) TTF_CloseFont(st->text_font_large);
+	glDeleteProgram(st->hsv_grad_shader);
+	SDL_GL_DeleteContext(st->gl_context);
+	SDL_DestroyWindow(st->window);
+	TTF_Quit();
+	SDL_Quit();
+	free(st);
 
 	return 0;
 }
