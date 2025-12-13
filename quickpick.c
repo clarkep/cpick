@@ -23,7 +23,8 @@ License: GPL 3(see LICENSE)
 
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_ttf.h>
-#include <GL/glew.h>
+#include <glad/glad.h>
+// #include <GL/glew.h>
 
 #include "util.h"
 #include "draw.h"
@@ -1501,11 +1502,18 @@ int main(int argc, char *argv[])
 		errexit("SDL_GL_CreateContext failed: %s\n", SDL_GetError());
 	}
 
+/*
 	glewExperimental = GL_TRUE;
 	GLenum glew_err = glewInit();
 	if (glew_err != GLEW_OK) {
 		errexit("glewInit failed: %s\n", glewGetErrorString(glew_err));
 	}
+*/
+    if (!gladLoadGLLoader((GLADloadproc)SDL_GL_GetProcAddress)) {
+        fprintf(stderr, "Failed to initialize GLAD");
+        goto exit;
+    }
+
 
 	// xxx this stuff...
 	// enable vsync
@@ -1661,6 +1669,7 @@ int main(int argc, char *argv[])
 */
     }
 
+    exit:
 	SDL_GL_DeleteContext(st->gl_context);
 	SDL_DestroyWindow(st->window);
 	SDL_Quit();

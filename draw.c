@@ -4,8 +4,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <math.h>
-#include <GL/glew.h>
-// #include <glad/glad.h>
+/// #include <GL/glew.h>
+#include <glad/glad.h>
 
 #include "util.h"
 #include "draw.h"
