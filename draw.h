@@ -83,7 +83,7 @@ float measure_text_width(GL_Scene *scene, int font_i, const char *text);
 GL_Scene *create_scene(const char *vertex_shader, const char *fragment_shader,
     i32 vertex_size, i32 max_vertices, bool use_screen_coords);
 // Unlike the other add_ functions, this is to be called once at initialization, not every frame
-int add_font(GL_Scene *scene, const char *font_file, u32 font_size_px, u32 *charset, u32 charset_n);
+int load_font(GL_Scene *scene, const char *font_file, u32 font_size_px, u32 *charset, u32 charset_n);
 void reset_scene(GL_Scene *scene);
 void draw_scene(GL_Scene *scene);
 

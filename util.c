@@ -9,7 +9,7 @@
 #include "util.h"
 
 char *program_name = "";
-bool debug_mode = true;
+bool debug_mode = false;
 
 Vector2 normalize_v2(Vector2 v)
 {

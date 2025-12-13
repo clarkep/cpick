@@ -944,7 +944,7 @@ static int ensure_freetype_initialized(void)
     return 0;
 }
 
-int add_font(GL_Scene *scene, const char *font_file, u32 font_size_px, u32 *charset, u32 charset_n)
+int load_font(GL_Scene *scene, const char *font_file, u32 font_size_px, u32 *charset, u32 charset_n)
 {
     if (scene->n_fonts >= GL_MAX_FONTS) {
         fprintf(stderr, "Max fonts (%d) reached\n", GL_MAX_FONTS);

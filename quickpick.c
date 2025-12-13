@@ -166,7 +166,7 @@ char *color_strings[2][3] = { "R", "G", "B", "H", "S", "V" };
 /*************************************** CC stuff *************************************************/
 
 // Color utility functions
-Color GetColor(unsigned int hex) {
+Color hex2color(unsigned int hex) {
 	return (Color){
 		(hex >> 24) & 0xFF,
 		(hex >> 16) & 0xFF,
@@ -175,10 +175,10 @@ Color GetColor(unsigned int hex) {
 	};
 }
 
-Color ColorBrightness(Color c, float factor) {
-	int r = c.r + (int)(255 * factor);
-	int g = c.g + (int)(255 * factor);
-	int b = c.b + (int)(255 * factor);
+Color color_brightness(Color c, float factor) {
+	float r = (float) c.r + ((255-c.r) * factor);
+	float g = (float) c.g + ((255-c.g) * factor);
+	float b = (float) c.b + ((255-c.b) * factor);
 	return (Color){
 		(unsigned char)CLAMP(r, 0, 255),
 		(unsigned char)CLAMP(g, 0, 255),
@@ -187,7 +187,7 @@ Color ColorBrightness(Color c, float factor) {
 	};
 }
 
-Vector3 ColorToHSV(Color c) {
+Vector3 color_to_hsv(Color c) {
 	float r = c.r / 255.0f;
 	float g = c.g / 255.0f;
 	float b = c.b / 255.0f;
@@ -221,7 +221,7 @@ Vector3 ColorToHSV(Color c) {
 	return hsv;
 }
 
-Color ColorFromHSV(float h, float s, float v) {
+Color color_from_hsv(float h, float s, float v) {
 	float c = v * s;
 	float x = c * (1 - fabsf(fmodf(h / 60.0f, 2) - 1));
 	float m = v - c;
@@ -398,7 +398,7 @@ struct color_info current_color(struct state *st)
 				break;
 			}
 		}
-		res.hsv = ColorToHSV(res.rgb);
+		res.hsv = color_to_hsv(res.rgb);
 	} else {
 		if (st->from_alternate_value) {
 			res.hsv = st->alternate_value;
@@ -417,7 +417,7 @@ struct color_info current_color(struct state *st)
 			break;
 			}
 		}
-		res.rgb = ColorFromHSV(res.hsv.x, res.hsv.y, res.hsv.z);
+		res.rgb = color_from_hsv(res.hsv.x, res.hsv.y, res.hsv.z);
 	}
 	if (st->from_alternate_value) {
 		update_color_or_mode(st, st->mode, st->which_fixed, res);
@@ -594,7 +594,7 @@ void draw_gradient_circle_and_axes(int x, int y, int r, float fixed_val, struct 
 	Vector2 ah_right = { arrow_end.x + ah_len*cosf(-ah_ang), arrow_end.y + ah_len*sinf(-ah_ang)};
 	add_line(st->main_scene, arrow_end.x, arrow_end.y, ah_left.x, ah_left.y, ah_w, gl_color(st->text_color));
 	add_line(st->main_scene, arrow_end.x, arrow_end.y, ah_right.x, ah_right.y, ah_w, gl_color(st->text_color));
-	add_text(st->main_scene, st->text_font_small, "S", arrow_end.x-16.0*dpi, arrow_end.y-31.0*dpi,
+	add_text(st->main_scene, st->text_font_medium, "S", arrow_end.x-16.0*dpi, arrow_end.y-20.0*dpi,
 		gl_color(st->text_color));
 	// h arrow
 	float harr_d = 30*dpi;
@@ -616,7 +616,7 @@ void draw_gradient_circle_and_axes(int x, int y, int r, float fixed_val, struct 
 	add_line(st->main_scene, harr_end.x, harr_end.y, h_ah_left.x, h_ah_left.y, ah_w, gl_color(c3));
 	add_line(st->main_scene, harr_end.x, harr_end.y, h_ah_right.x, h_ah_right.y, ah_w,
 		gl_color(c3));
-	add_text(st->main_scene, st->text_font_small, "H", harr_end.x+18*dpi, harr_end.y-2*dpi,
+	add_text(st->main_scene, st->text_font_medium, "H", harr_end.x+18*dpi, harr_end.y-2*dpi,
 		gl_color(st->text_color));
 	add_circle_arc(st->main_scene, x, y, r+harr_d+harr_w/2, 2*M_PI*harr_ang1/360.0f, 2*M_PI*harr_ang2/360.0f,
 		30, 2.0f*dpi, gl_color(st->text_color));
@@ -670,12 +670,12 @@ bool tab_select(Tab_Select *self, Vector2 pos, enum cursor_state cs)
 	Color active_text = self->active_text_color;
 	Color inactive_text = self->inactive_text_color;
 	float *hover_v = self->hover_v;
-	Color color1 = i == 0 ? active[0] : ColorBrightness(inactive[0], self->hover_brightness*hover_v[0]);
-	Color color2 = i == 1 ? active[1] : ColorBrightness(inactive[1], self->hover_brightness*hover_v[1]);
-	Color color3 = i == 2 ? active[2] : ColorBrightness(inactive[2], self->hover_brightness*hover_v[2]);
-	Color text_color1 = i == 0 ? active_text : ColorBrightness(inactive_text, self->hover_brightness*hover_v[0]);
-	Color text_color2 = i == 1 ? active_text : ColorBrightness(inactive_text, self->hover_brightness*hover_v[1]);
-	Color text_color3 = i == 2 ? active_text : ColorBrightness(inactive_text, self->hover_brightness*hover_v[2]);
+	Color color1 = i == 0 ? active[0] : color_brightness(inactive[0], self->hover_brightness*hover_v[0]);
+	Color color2 = i == 1 ? active[1] : color_brightness(inactive[1], self->hover_brightness*hover_v[1]);
+	Color color3 = i == 2 ? active[2] : color_brightness(inactive[2], self->hover_brightness*hover_v[2]);
+	Color text_color1 = i == 0 ? active_text : color_brightness(inactive_text, self->hover_brightness*hover_v[0]);
+	Color text_color2 = i == 1 ? active_text : color_brightness(inactive_text, self->hover_brightness*hover_v[1]);
+	Color text_color3 = i == 2 ? active_text : color_brightness(inactive_text, self->hover_brightness*hover_v[2]);
 	char text[2] = "X";
 	float x = self->x;
 	float tw = self->w / 3.0;
@@ -684,7 +684,6 @@ bool tab_select(Tab_Select *self, Vector2 pos, enum cursor_state cs)
 	float off = 0 * dpi;
 	float y = self->top ? self->y : self->y - off;
 	// xx
-	float lbl_margin = 22*dpi;
 	float h = self->h + off;
 	float text_y = y + h/2.0f + st->small_font_max_ascent/2.0f;
 	Vector2 left_corners[4] = { { x, y }, { x, y+h }, { x+tw, y+h }, { x+tw, y }};
@@ -794,7 +793,7 @@ bool number_select(Number_Select *self, Vector2 pos, enum cursor_state cs, int k
 		c = text[d_i + d_chars];
 		// xx GetGlColor at least
 		add_text(st->main_scene, st->text_font_medium, &text[d_i], x, text_y,
-			gl_color(st->text_color.r < 128 ? GetColor(0x303030ff) : GetColor(0xd8d8d8ff)));
+			gl_color(st->text_color.r < 128 ? hex2color(0x303030ff) : hex2color(0xd8d8d8ff)));
 		text[d_i + d_chars] = c;
 		x += d_chars * (st->medium_char_width + 1.5*dpi);
 		add_text(st->main_scene, st->text_font_medium, &text[d_i+d_chars], x, text_y,
@@ -961,7 +960,7 @@ void draw_ui_and_respond_input(struct state *st)
 	if (st->mode == 0) {
 		int wf = st->which_fixed;
 		int rgb_fixed_ind[] = { 0xc00000ff, 0x00c000ff, 0x0080ffff };
-		fixed_indication_color = GetColor(rgb_fixed_ind[wf]);
+		fixed_indication_color = hex2color(rgb_fixed_ind[wf]);
 		light_text_indication_color = fixed_indication_color;
 	} else {
 		int a = st->text_color.r < 128 ? dark_text_bright_grey_bg : light_text_bright_grey_bg;
@@ -983,11 +982,12 @@ void draw_ui_and_respond_input(struct state *st)
 	bool out_ind_rounded[4] = { true, true, false, false };
 	Color out_ind_bgcolor = { 48, 48, 48, 192 };
 	if (st->outfile.path) {
-		int text_x = out_ind_bottom_x + (out_ind_bottom_w - st->outfile.shortened_path_len*(st->small_char_width+1.0*dpi))/2.0f;
+		i32 text_x = out_ind_bottom_x + (out_ind_bottom_w - st->outfile.shortened_path_len*(st->small_char_width+1.0*dpi))/2.0f;
+		i32 text_y = out_ind_top_y + out_ind_h/2.0f + st->small_font_max_ascent/2.0f;
 		add_rounded_quad(st->main_scene, out_ind_verts, out_ind_rounded, 12*dpi, 12,
 			gl_color(out_ind_bgcolor));
 		add_text(st->main_scene, st->text_font_small, st->outfile.shortened_path,
-			text_x, out_ind_top_y + 3*dpi + 22*dpi, gl_color(WHITE));
+			text_x, text_y, gl_color(WHITE));
 	}
 
 	// gradient
@@ -1075,20 +1075,20 @@ void draw_ui_and_respond_input(struct state *st)
 	int ind_button_h = 70*dpi;
 	// int ind_tabs_y = ind_button_y + ind_button_h - ind_tabs_h - 1;
 	int ind_tabs_y = ind_button_y + ind_button_h;
-	Color ind_border_color = GetColor(0xb0b0b0ff);
+	Color ind_border_color = hex2color(0xb0b0b0ff);
 	// tabs
 	static Tab_Select rgb_select;
 	static Tab_Select hsv_select;
 	static bool first_frame_setup_done = false;
 	if (!first_frame_setup_done) {
-		rgb_select.active_colors[0] = GetColor(0xc00000ff);
-		rgb_select.active_colors[1] = GetColor(0x00c000ff);
-		rgb_select.active_colors[2] = GetColor(0x0080ffff);
-		rgb_select.inactive_colors[0] = GetColor(0x700000ff);
-		rgb_select.inactive_colors[1] = GetColor(0x007000ff);
-		rgb_select.inactive_colors[2] = GetColor(0x0000c0ff);
-		rgb_select.active_text_color = GetColor(0xffffffff);
-		rgb_select.inactive_text_color = GetColor(0xa0a0a0ff);
+		rgb_select.active_colors[0] = hex2color(0xc00000ff);
+		rgb_select.active_colors[1] = hex2color(0x00c000ff);
+		rgb_select.active_colors[2] = hex2color(0x0080ffff);
+		rgb_select.inactive_colors[0] = hex2color(0x700000ff);
+		rgb_select.inactive_colors[1] = hex2color(0x007000ff);
+		rgb_select.inactive_colors[2] = hex2color(0x0000c0ff);
+		rgb_select.active_text_color = hex2color(0xffffffff);
+		rgb_select.inactive_text_color = hex2color(0xa0a0a0ff);
 		rgb_select.labels[0] = 'R';
 		rgb_select.labels[1] = 'G';
 		rgb_select.labels[2] = 'B';
@@ -1146,7 +1146,7 @@ void draw_ui_and_respond_input(struct state *st)
 	// main button
 	static float ind_button_hover_v = 0;
 	float hov_bright = .4;
-	Color fixed_button_color = ColorBrightness(light_text_indication_color, ind_button_hover_v * hov_bright);
+	Color fixed_button_color = color_brightness(light_text_indication_color, ind_button_hover_v * hov_bright);
 	add_rectangle(st->main_scene, ind_button_x, ind_button_y, ind_button_w, ind_button_h,
 		gl_color(fixed_button_color));
 	add_rectangle_outline(st->main_scene, ind_button_x, ind_button_y, ind_button_w, ind_button_h,
@@ -1210,7 +1210,7 @@ void draw_ui_and_respond_input(struct state *st)
 	bool rgb_num_select_changed = false;
 	int rgb_select_w = 6*(st->medium_char_width + 1.5*dpi);
 	int r_select_x = (st->screenWidth - st->medium_label_width)/2.0f;
-	int r_select_y = val_slider_y + 75*dpi;
+	int r_select_y = val_slider_y + 85*dpi;
 	static Number_Select r_num_select;
 	r_num_select.value = cur_color.r;
 	if (number_select_immargs(&r_num_select, "r:%d ", 0, 255, false, st, anim_vdt,
@@ -1237,7 +1237,7 @@ void draw_ui_and_respond_input(struct state *st)
 			st->from_alternate_value = true;
 			st->alternate_value = (Vector3) { new_rgb.r / 255.0f, new_rgb.g / 255.0f, new_rgb.b / 255.0f };
 		}
-		Vector3 new_hsv = ColorToHSV(new_rgb);
+		Vector3 new_hsv = color_to_hsv(new_rgb);
 		struct color_info new_ci = { new_rgb, new_hsv };
 		update_color_or_mode(st, st->mode, st->which_fixed, new_ci);
 	}
@@ -1280,7 +1280,7 @@ void draw_ui_and_respond_input(struct state *st)
 			st->alternate_value = new_hsv;
 			st->alternate_value.x /= 360.0f;
 		}
-		Color new_rgb = ColorFromHSV(new_hsv.x, new_hsv.y, new_hsv.z);
+		Color new_rgb = color_from_hsv(new_hsv.x, new_hsv.y, new_hsv.z);
 		struct color_info new_ci = { new_rgb, new_hsv };
 		update_color_or_mode(st, st->mode, st->which_fixed, new_ci);
 	}
@@ -1388,9 +1388,9 @@ void init_for_dpi(struct state *st, float dpi, float old_dpi)
 	}
 
 	char *font_file = "font/NotoSansMono-Regular.ttf";
-	st->text_font_small = add_font(st->main_scene, font_file, 22*dpi, NULL, 0);
-	st->text_font_medium = add_font(st->main_scene, font_file, 30*dpi, NULL, 0);
-	st->text_font_large = add_font(st->main_scene, font_file, 40*dpi, NULL, 0);
+	st->text_font_small = load_font(st->main_scene, font_file, 17*dpi, NULL, 0);
+	st->text_font_medium = load_font(st->main_scene, font_file, 23*dpi, NULL, 0);
+	st->text_font_large = load_font(st->main_scene, font_file, 35*dpi, NULL, 0);
 
 	// Measure the label width once; since it's a monospace font, it will be the same for all colors.
 	/*
@@ -1537,7 +1537,7 @@ int main(int argc, char *argv[])
 		if (success) {
 			struct color_info ci;
 			ci.rgb = start_color;
-			ci.hsv = ColorToHSV(start_color);
+			ci.hsv = color_to_hsv(start_color);
 			update_color_or_mode(st, st->mode, st->which_fixed, ci);
 		} else {
 			// since we failed to read, we probably shouldn't write
