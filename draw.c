@@ -5,8 +5,7 @@
 #include <stdbool.h>
 #include <math.h>
 /// #include <GL/glew.h>
-#include <glad/glad.h>
-
+#include "glad.h"
 #include "util.h"
 #include "draw.h"
 
@@ -944,25 +943,8 @@ static int ensure_freetype_initialized(void)
     return 0;
 }
 
-int load_font(GL_Scene *scene, const char *font_file, u32 font_size_px, u32 *charset, u32 charset_n)
+int load_font_internal(GL_Scene *scene, FT_Face face, u32 font_size_px, u32 *charset, u32 charset_n)
 {
-    if (scene->n_fonts >= GL_MAX_FONTS) {
-        fprintf(stderr, "Max fonts (%d) reached\n", GL_MAX_FONTS);
-        return -1;
-    }
-    if (ensure_freetype_initialized() != 0) {
-        return -1;
-    }
-    if (!charset) {
-        build_default_charset(&charset, &charset_n);
-    }
-    FT_Face face;
-    FT_Error error = FT_New_Face(g_ft_library, font_file, 0, &face);
-    if (error) {
-        fprintf(stderr, "Failed to create font face for %s.\n", font_file);
-        return -1;
-    }
-
     Font_Atlas *atlas = create_font_atlas(face,  charset, charset_n, font_size_px);
 
     u32 tex;
@@ -989,6 +971,50 @@ int load_font(GL_Scene *scene, const char *font_file, u32 font_size_px, u32 *cha
     }
 
     return slot;
+}
+
+int load_font_from_memory(GL_Scene *scene, const void *font_data, u64 data_size, u32 font_size_px,
+    u32 *charset, u32 charset_n)
+{
+    if (scene->n_fonts >= GL_MAX_FONTS) {
+        fprintf(stderr, "Max fonts (%d) reached\n", GL_MAX_FONTS);
+        return -1;
+    }
+    if (ensure_freetype_initialized() != 0) {
+        return -1;
+    }
+    if (!charset) {
+        build_default_charset(&charset, &charset_n);
+    }
+    FT_Open_Args open_args = { FT_OPEN_MEMORY, font_data, data_size, NULL, NULL, NULL, 0, NULL };
+    FT_Face face;
+    FT_Error error = FT_Open_Face(g_ft_library, &open_args, 0, &face);
+    if (error) {
+        fprintf(stderr, "Failed to create font face(from memory).\n");
+        return -1;
+    }
+    return load_font_internal(scene, face, font_size_px, charset, charset_n);
+}
+
+int load_font(GL_Scene *scene, const char *font_file, u32 font_size_px, u32 *charset, u32 charset_n)
+{
+    if (scene->n_fonts >= GL_MAX_FONTS) {
+        fprintf(stderr, "Max fonts (%d) reached\n", GL_MAX_FONTS);
+        return -1;
+    }
+    if (ensure_freetype_initialized() != 0) {
+        return -1;
+    }
+    if (!charset) {
+        build_default_charset(&charset, &charset_n);
+    }
+    FT_Face face;
+    FT_Error error = FT_New_Face(g_ft_library, font_file, 0, &face);
+    if (error) {
+        fprintf(stderr, "Failed to create font face for %s.\n", font_file);
+        return -1;
+    }
+    return load_font_internal(scene, face, font_size_px, charset, charset_n);
 }
 
 GL_Scene *create_scene(const char *vertex_shader, const char *fragment_shader, i32 vertex_size,

@@ -18,22 +18,23 @@ License: GPL 3(see LICENSE)
 #include <errno.h>
 #include <math.h> // round
 #include <stdbool.h>
-// #include <raylib.h>
-// #include <rlgl.h>
 
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_ttf.h>
-#include <glad/glad.h>
-// #include <GL/glew.h>
+#include "glad.h"
 
 #include "util.h"
 #include "draw.h"
 
 #include "font/noto_sans_mono.h"
 #include "quickpick_icon.h"
-// #include "shapes.h"
 
 #define WRITE_INTERVAL 1.0
+#define FONT_SMALL_PX 17*dpi
+#define FONT_MEDIUM_PX 23*dpi
+#define FONT_LARGE_PX 35*dpi
+// For vertically centering text, fraction of the em box to place at the center of the region
+#define CENTER_EM 0.35f
 
 /**************/
 
@@ -686,7 +687,7 @@ bool tab_select(Tab_Select *self, Vector2 pos, enum cursor_state cs)
 	float y = self->top ? self->y : self->y - off;
 	// xx
 	float h = self->h + off;
-	float text_y = y + h/2.0f + st->small_font_max_ascent/2.0f;
+	float text_y = y + h/2.0f + FONT_SMALL_PX*CENTER_EM;
 	Vector2 left_corners[4] = { { x, y }, { x, y+h }, { x+tw, y+h }, { x+tw, y }};
 	bool left_rounded[4] = { self->top, !self->top, false, false };
 	add_rounded_quad(st->main_scene, left_corners, left_rounded, rnd, segs, gl_color(color1));
@@ -751,7 +752,7 @@ bool number_select(Number_Select *self, Vector2 pos, enum cursor_state cs, int k
 	int a = 64 + self->shade_v;
 	Color hl_color = { a, a, a, self->shade_v };
 
-	i32 text_y = self->y + self->h/2.0f + st->medium_font_max_ascent/2.0f;
+	i32 text_y = self->y + self->h/2.0f + FONT_MEDIUM_PX*CENTER_EM;
 
 	bool hovered = false;
 	float rnd = 7.0f;
@@ -984,7 +985,7 @@ void draw_ui_and_respond_input(struct state *st)
 	Color out_ind_bgcolor = { 48, 48, 48, 192 };
 	if (st->outfile.path) {
 		i32 text_x = out_ind_bottom_x + (out_ind_bottom_w - st->outfile.shortened_path_len*(st->small_char_width+1.0*dpi))/2.0f;
-		i32 text_y = out_ind_top_y + out_ind_h/2.0f + st->small_font_max_ascent/2.0f;
+		i32 text_y = out_ind_top_y + out_ind_h/2.0f + FONT_SMALL_PX*CENTER_EM;
 		add_rounded_quad(st->main_scene, out_ind_verts, out_ind_rounded, 12*dpi, 12,
 			gl_color(out_ind_bgcolor));
 		add_text(st->main_scene, st->text_font_small, st->outfile.shortened_path,
@@ -1067,13 +1068,13 @@ void draw_ui_and_respond_input(struct state *st)
 
 	// fixed color buttons
 	int top_tabs_x = grad_square_x;
-	int top_tabs_y = grad_square_y_end + x_axis_h;
-	int top_tabs_h = 25*dpi;
-	int top_tabs_w = 90*dpi;
+	int top_tabs_y = grad_square_y_end + x_axis_h + 10*dpi;
+	int top_tabs_h = 30*dpi;
+	int top_tabs_w = 95*dpi;
 	int ind_button_x = top_tabs_x;
 	int ind_button_y = top_tabs_y + top_tabs_h;
 	int ind_button_w = top_tabs_w;
-	int ind_button_h = 70*dpi;
+	int ind_button_h = 75*dpi;
 	// int ind_tabs_y = ind_button_y + ind_button_h - ind_tabs_h - 1;
 	int ind_tabs_y = ind_button_y + ind_button_h;
 	Color ind_border_color = hex2color(0xb0b0b0ff);
@@ -1154,7 +1155,7 @@ void draw_ui_and_respond_input(struct state *st)
 		1*dpi, gl_color(ind_border_color));
 	Color white = { 255, 255, 255, 255 };
 	i32 ind_text_x = ind_button_x+ind_button_w/2.0f-st->large_char_width/2.0f;
-	i32 ind_text_y = ind_button_y + ind_button_h/2.0f+st->large_font_max_ascent/2.0f;
+	i32 ind_text_y = ind_button_y + ind_button_h/2.0f+FONT_LARGE_PX*CENTER_EM;
 	add_text(st->main_scene, st->text_font_large, color_strings[st->mode][st->which_fixed],
 		ind_text_x, ind_text_y, gl_color(white));
 	if (CheckCollisionPointRec(pos, (Rectangle) { ind_button_x, ind_button_y, ind_button_w,
@@ -1211,7 +1212,7 @@ void draw_ui_and_respond_input(struct state *st)
 	bool rgb_num_select_changed = false;
 	int rgb_select_w = 6*(st->medium_char_width + 1.5*dpi);
 	int r_select_x = (st->screenWidth - st->medium_label_width)/2.0f;
-	int r_select_y = val_slider_y + 85*dpi;
+	int r_select_y = val_slider_y + 90*dpi;
 	static Number_Select r_num_select;
 	r_num_select.value = cur_color.r;
 	if (number_select_immargs(&r_num_select, "r:%d ", 0, 255, false, st, anim_vdt,
@@ -1246,7 +1247,7 @@ void draw_ui_and_respond_input(struct state *st)
 	char value[40];
 	sprintf(value, "hex:#%02x%02x%02x", cur_color.r, cur_color.g, cur_color.b);
 	int hex_label_x = b_num_select.x + b_num_select.w;
-	int hex_label_y = r_num_select.y + r_num_select.h/2.0f + st->medium_font_max_ascent/2.0f;
+	int hex_label_y = r_num_select.y + r_num_select.h/2.0f + FONT_MEDIUM_PX*CENTER_EM;
 	i32 font_h = 30*dpi;
 	add_text(st->main_scene, st->text_font_medium, value, hex_label_x, hex_label_y,
 		gl_color(st->text_color));
@@ -1298,28 +1299,6 @@ void draw_ui_and_respond_input(struct state *st)
 	}
 }
 
-/*
-static const char *hsv_grad_vertex_shader =
-"#version 330 core\n"
-"uniform mat4 transform;\n"
-"void main() {\n"
-"    gl_Position = gl_ModelViewProjectionMatrix * gl_Vertex;\n"
-"    gl_FrontColor = gl_Color;\n"
-"}\n";
-
-static const char *hsv_grad_fragment_shader =
-"#version 330 core\n"
-"uniform mat4 transform;\n"
-"vec3 hsv2rgb(vec3 c) {\n"
-"    vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);\n"
-"    vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);\n"
-"    return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);\n"
-"}\n"
-"void main() {\n"
-"    gl_FragColor = vec4(hsv2rgb(gl_Color.xyz), 1.0);\n"
-"}\n";
-*/
-
 const char* hsv_grad_vertex_shader =
 "#version 330 core\n"
 "layout (location = 0) in vec3 aPos;\n"
@@ -1354,19 +1333,6 @@ const char* hsv_grad_fragment_shader =
 "void main()\n"
 "{\n"
 "    vec4 base = fColor;\n"
-"    if (fFontIndex >= 0.0) {\n"
-"        int idx = int(fFontIndex + 0.5);\n"
-"        float alpha = 0.0;\n"
-"        if (idx == 0) alpha = texture(uFonts[0], TexCoord).r;\n"
-"        else if (idx == 1) alpha = texture(uFonts[1], TexCoord).r;\n"
-"        else if (idx == 2) alpha = texture(uFonts[2], TexCoord).r;\n"
-"        else if (idx == 3) alpha = texture(uFonts[3], TexCoord).r;\n"
-"        else if (idx == 4) alpha = texture(uFonts[4], TexCoord).r;\n"
-"        else if (idx == 5) alpha = texture(uFonts[5], TexCoord).r;\n"
-"        else if (idx == 6) alpha = texture(uFonts[6], TexCoord).r;\n"
-"        else if (idx == 7) alpha = texture(uFonts[7], TexCoord).r;\n"
-"        base.a *= alpha;\n"
-"    }\n"
 "    FragColor = vec4(hsv2rgb(base.xyz), base.w);\n"
 "}";
 
@@ -1384,27 +1350,19 @@ void init_for_dpi(struct state *st, float dpi, float old_dpi)
 	int new_target_h = st->screenHeight * ratio;
 	if (new_target_w  != st->screenWidth) {
 		SDL_SetWindowSize(st->window, new_target_w, new_target_h);
-		st->screenWidth = new_target_w; // GetScreenWidth();
-		st->screenHeight = new_target_h; // GetScreenHeight();
+		st->screenWidth = new_target_w;
+		st->screenHeight = new_target_h;
 	}
 
-	char *font_file = "font/NotoSansMono-Regular.ttf";
-	st->text_font_small = load_font(st->main_scene, font_file, 17*dpi, NULL, 0);
-	st->text_font_medium = load_font(st->main_scene, font_file, 23*dpi, NULL, 0);
-	st->text_font_large = load_font(st->main_scene, font_file, 35*dpi, NULL, 0);
+	st->text_font_small = load_font_from_memory(st->main_scene, noto_sans_mono,
+		noto_sans_mono_len, FONT_SMALL_PX, NULL, 0);
+	st->text_font_medium = load_font_from_memory(st->main_scene, noto_sans_mono,
+		noto_sans_mono_len, FONT_MEDIUM_PX, NULL, 0);
+	st->text_font_large = load_font_from_memory(st->main_scene, noto_sans_mono,
+		noto_sans_mono_len, FONT_LARGE_PX, NULL, 0);
 
-	// Measure the label width once; since it's a monospace font, it will be the same for all colors.
-	/*
-	st->medium_label_width = MeasureTextEx(st->text_font_medium, "r:255 g:255 b:255 hex:#ffffff",
-		30*dpi, 1.5*dpi).x;
-	st->small_char_width = MeasureTextEx(st->text_font_small, "R",
-		22*dpi, 0*dpi).x;
-	st->medium_char_width = MeasureTextEx(st->text_font_medium, "R",
-		30*dpi, 0*dpi).x;
-	st->large_char_width = MeasureTextEx(st->text_font_large, "R",
-		40*dpi, 0*dpi).x;
-	*/
-	st->medium_label_width = measure_text_width(st->main_scene, st->text_font_medium, "r:255 g:255 b:255 hex:#ffffff");
+	st->medium_label_width = measure_text_width(st->main_scene, st->text_font_medium,
+		"r:255 g:255 b:255 hex:#ffffff");
 	st->small_char_width = measure_text_width(st->main_scene, st->text_font_small, "R");
 	st->medium_char_width = measure_text_width(st->main_scene, st->text_font_medium, "R");
 	st->large_char_width = measure_text_width(st->main_scene, st->text_font_large, "R");
@@ -1514,7 +1472,6 @@ int main(int argc, char *argv[])
         goto exit;
     }
 
-
 	// xxx this stuff...
 	// enable vsync
 	// SDL_GL_SetSwapInterval(1);
@@ -1558,8 +1515,6 @@ int main(int argc, char *argv[])
 	st->main_scene = create_scene(NULL, NULL, 10, 10000, true);
 	st->hsv_grad_scene = create_scene(hsv_grad_vertex_shader, hsv_grad_fragment_shader,
 		10, 361*3, true);
-	// st->hsv_grad_scene = create_scene(NULL, NULL,
-	// 	10, 361*3, true);
 
 	int drawable_w, drawable_h;
 	SDL_GL_GetDrawableSize(st->window, &drawable_w, &drawable_h);
@@ -1629,14 +1584,6 @@ int main(int argc, char *argv[])
 		// Setup viewport and projection
 		glViewport(0, 0, drawable_w, drawable_h);
 
-		/*
-		glMatrixMode(GL_PROJECTION);
-		glLoadIdentity();
-		glOrtho(0, st->screenWidth, st->screenHeight, 0, -1, 1);
-		glMatrixMode(GL_MODELVIEW);
-		glLoadIdentity();
-		*/
-
 		reset_scene(st->hsv_grad_scene);
 		reset_scene(st->main_scene);
 
@@ -1660,13 +1607,6 @@ int main(int argc, char *argv[])
 		}
 */
 
-/*
-		st->screenWidth = GetScreenWidth();
-		st->screenHeight = GetScreenHeight();
-		BeginDrawing();
-		draw_ui_and_respond_input(st);
-		EndDrawing();
-*/
     }
 
     exit:
