@@ -22,7 +22,9 @@ If using an output file, the selected color will be automatically written to the
 
 Building
 --------
-This project depends on [raylib](https://github.com/raysan5/raylib).
+This project depends on [SDL2](https://www.libsdl.org/) and [freetype](https://freetype.org).
+
+### CMake
 
 To build with cmake, run
 
@@ -32,9 +34,14 @@ followed by
 
      $ cmake --build build
 
-This will fetch and build raylib if it is not found. On Windows, the executable is placed at `build\Debug\quickpick.exe`
-by default, and on macOS or Linux it is placed at `build\quickpick`.
+This will fetch and build SDL2 and freetype by default. To use previously installed versions of these libraries, configure with:
 
-Alternatively, if you are on macOS or Linux and raylib is already installed, you can use the simple build script:
+    $ cmake -B build -DSYSTEM_LIBS=ON
+
+On Windows, the executable is placed at `build\Debug\quickpick.exe` by default, and on macOS or Linux it is placed at `build\quickpick`.
+
+### Build script
+
+Alternatively, if you are on macOS or Linux and the dependencies are already installed, you can use the simple build script:
 
      $ ./build.sh
