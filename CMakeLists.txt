@@ -13,6 +13,8 @@ if (${SYSTEM_LIBS})
     find_package(SDL2 REQUIRED CONFIG REQUIRED COMPONENTS SDL2)
     find_package(Freetype REQUIRED)
     add_library(freetype ALIAS Freetype::Freetype)
+    add_executable(${PROJECT_NAME} quickpick.c draw.c util.c glad.c)
+    target_link_libraries(${PROJECT_NAME} PRIVATE SDL2::SDL2)
 else()
 #     FetchContent_Declare(
 #        SDL2
@@ -24,20 +26,27 @@ else()
         URL https://github.com/libsdl-org/SDL/releases/download/release-2.30.11/SDL2-2.30.11.tar.gz
         URL_HASH MD5=bea190b480f6df249db29eb3bacfe41e
     )
+    set(SDL_SHARED OFF CACHE BOOL "" FORCE)
+    set(SDL_STATIC ON  CACHE BOOL "" FORCE)
     FetchContent_MakeAvailable(SDL2)
     FetchContent_Declare(
         Freetype
         URL https://download.savannah.gnu.org/releases/freetype/freetype-2.13.3.tar.gz
         URL_HASH MD5=ac1f0b517f62bd40d50bc995faa5741d
     )
+    set(FT_DISABLE_ZLIB     ON  CACHE BOOL "" FORCE)
+    set(FT_DISABLE_BZIP2    ON  CACHE BOOL "" FORCE)
+    set(FT_DISABLE_PNG      ON  CACHE BOOL "" FORCE)
+    set(FT_DISABLE_HARFBUZZ ON  CACHE BOOL "" FORCE)
+    set(FT_DISABLE_BROTLI   ON CACHE BOOL "" FORCE)
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
     FetchContent_MakeAvailable(Freetype)
-    get_property(allTargets GLOBAL PROPERTY TARGETS)
-    message(STATUS "Targets: ${allTargets}")
+
+    add_executable(${PROJECT_NAME} quickpick.c draw.c util.c glad.c)
+
+    target_link_libraries(${PROJECT_NAME} PRIVATE SDL2::SDL2-static)
 endif()
 
-add_executable(${PROJECT_NAME} quickpick.c draw.c util.c glad.c)
-
-target_link_libraries(${PROJECT_NAME} PRIVATE SDL2::SDL2)
 target_link_libraries(${PROJECT_NAME} PRIVATE freetype)
 target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
