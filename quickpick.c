@@ -23,6 +23,9 @@ License: GPL 3(see LICENSE)
 #include <SDL2/SDL.h>
 #include <glad/glad.h>
 
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+
 #include "util.h"
 #include "draw.h"
 
@@ -1367,6 +1370,18 @@ void init_for_dpi(struct state *st, float dpi, float old_dpi)
 	st->large_font_max_ascent = st->main_scene->fonts[st->text_font_large]->max_ascent;
 }
 
+SDL_Surface* surface_from_memory(const u8* buffer, int size, u8 **bmp) {
+	int x, y, channels;
+	*bmp = stbi_load_from_memory (buffer, size, &x, &y, &channels, 4);
+
+    SDL_Surface* res = SDL_CreateRGBSurfaceFrom(*bmp, x, y, 32, x*4, 0xff, 0xff00, 0xff0000, 0xff000000);
+    if (!res) {
+        fprintf(stderr, "SDL_CreateRGBSurfaceFrom failed: %s\n", SDL_GetError());
+        return NULL;
+    }
+//    stbi_image_free(bmp);
+    return res;
+}
 int main(int argc, char *argv[])
 {
 	struct state *st = (struct state *) calloc(1, sizeof(struct state));
@@ -1433,6 +1448,9 @@ int main(int argc, char *argv[])
 	SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 1);
 	SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, 4);
 
+	u8 *bmp;
+	SDL_Surface *icon_surface = surface_from_memory(quickpick_icon_png, quickpick_icon_png_len, &bmp);
+
 	st->window = SDL_CreateWindow("QuickPick",
 		SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
 		st->screenWidth, st->screenHeight,
@@ -1441,14 +1459,10 @@ int main(int argc, char *argv[])
 		errexit("SDL_CreateWindow failed: %s\n", SDL_GetError());
 	}
 
-	// set window icon
-	SDL_RWops *icon_rw = SDL_RWFromMem(quickpick_icon_png, quickpick_icon_png_len);
-	SDL_Surface *icon_surface = SDL_LoadBMP_RW(icon_rw, 1);
-	// Note: PNG loading would require SDL_image, so icon may not work without it
-	// For now we skip icon setting if it fails
 	if (icon_surface) {
 		SDL_SetWindowIcon(st->window, icon_surface);
 		SDL_FreeSurface(icon_surface);
+		stbi_image_free(bmp);
 	}
 
 	st->gl_context = SDL_GL_CreateContext(st->window);
@@ -1456,13 +1470,6 @@ int main(int argc, char *argv[])
 		errexit("SDL_GL_CreateContext failed: %s\n", SDL_GetError());
 	}
 
-/*
-	glewExperimental = GL_TRUE;
-	GLenum glew_err = glewInit();
-	if (glew_err != GLEW_OK) {
-		errexit("glewInit failed: %s\n", glewGetErrorString(glew_err));
-	}
-*/
     if (!gladLoadGLLoader((GLADloadproc)SDL_GL_GetProcAddress)) {
         fprintf(stderr, "Failed to initialize GLAD");
         goto exit;
