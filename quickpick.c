@@ -19,9 +19,9 @@ License: GPL 3(see LICENSE)
 #include <math.h> // round
 #include <stdbool.h>
 
+#define SDL_MAIN_HANDLED
 #include <SDL2/SDL.h>
-#include <SDL2/SDL_ttf.h>
-#include "glad.h"
+#include <glad/glad.h>
 
 #include "util.h"
 #include "draw.h"
@@ -720,7 +720,7 @@ bool tab_select(Tab_Select *self, Vector2 pos, enum cursor_state cs)
 	bool updated = false;
 	float hover_targets[3] = { 0.0f, 0.0f, 0.0f };
 	if (CheckCollisionPointRec(pos, (Rectangle) { self->x, self->y, self->w, self->h})) {
-		int tab_i = (pos.x - self->x) / (self->w / 3.0f);
+		int tab_i = CLAMP((pos.x - self->x) / (self->w / 3.0f), 0, 2);
 		if (cs == CURSOR_START && tab_i != self->sel_i) {
 			self->sel_i = tab_i;
 			updated = true;
@@ -749,8 +749,8 @@ bool number_select(Number_Select *self, Vector2 pos, enum cursor_state cs, int k
 	self->w = (st->medium_char_width + 1.5*dpi) * n_chars;
 	self->h = 30*dpi;
 	*/
-	int a = 64 + self->shade_v;
-	Color hl_color = { a, a, a, self->shade_v };
+	int a = st->text_color.r < 128 ? 64 + 64*self->shade_v : 196 - 64*self->shade_v;
+	Color hl_color = { a, a, a, 128*self->shade_v };
 
 	i32 text_y = self->y + self->h/2.0f + FONT_MEDIUM_PX*CENTER_EM;
 
@@ -820,8 +820,8 @@ bool number_select(Number_Select *self, Vector2 pos, enum cursor_state cs, int k
 		self->input_active = false;
 	}
 	if (self->selected && key) {
-		int key_num = (key >= KEY_ZERO && key <= KEY_NINE) ? (key - KEY_ZERO)
-			: (key >= KEY_KP_0 && key <= KEY_KP_9 ? (key - KEY_KP_0) : -1);
+		int key_num = (key >= SDL_SCANCODE_1 && key <= SDL_SCANCODE_0) ? ((key-SDL_SCANCODE_1+1)%10)
+			: (key >= SDL_SCANCODE_KP_1 && key <= SDL_SCANCODE_KP_0 ? ((key-SDL_SCANCODE_KP_1+1)%10) : -1);
 		if (!self->input_active && key_num >= 0) {
 			// This breaks input if self->min > 9, but that doesn't apply to us and would require
 			// some special logic.
@@ -835,17 +835,17 @@ bool number_select(Number_Select *self, Vector2 pos, enum cursor_state cs, int k
 				self->input_n = new_input_n;
 			}
 		}
-		if (self->input_active && key == KEY_BACKSPACE) {
+		if (self->input_active && key == SDL_SCANCODE_BACKSPACE) {
 			if (self->input_n >= 10) {
 				self->input_n /= 10;
 			} else {
 				self->input_active = false;
 			}
 		}
-		if (self->input_active && key == KEY_ESCAPE) {
+		if (self->input_active && key == SDL_SCANCODE_ESCAPE) {
 			self->input_active = false;
 		}
-		if (self->input_active && key == KEY_ENTER) {
+		if (self->input_active && key == SDL_SCANCODE_RETURN) {
 			new_value = self->input_n;
 			self->input_active = false;
 		}
@@ -875,13 +875,13 @@ bool number_select(Number_Select *self, Vector2 pos, enum cursor_state cs, int k
 			}
 		}
 	}
-	int shade_v_target = 0;
+	float shade_v_target = 0.0;
 	if (self->selected) {
-		shade_v_target = 128;
+		shade_v_target = 1.0f;
 	} else if (hovered) {
-		shade_v_target = 102;
+		shade_v_target = 0.5f;
 	}
-	value_creep_towards(&self->shade_v, shade_v_target, self->anim_vdt * 100);
+	value_creep_towards(&self->shade_v, shade_v_target, self->anim_vdt * .6);
 	if (new_value != self->value) {
 		self->value = new_value;
 		return true;
@@ -937,7 +937,7 @@ void draw_ui_and_respond_input(struct state *st)
 	Vector2 pos = GetMousePosition(st);
 	// consume one keypress per frame
 	int key = st->key_pressed;
-	float anim_vdt = .3;
+	float anim_vdt = .2;
 
 	struct color_info ci = current_color(st);
 	Color cur_color = ci.rgb;
@@ -1549,6 +1549,7 @@ int main(int argc, char *argv[])
 					// Don't quit on escape, just pass it through
 				}
 				st->key_pressed = event.key.keysym.scancode;
+				debug("%d\n", st->key_pressed);
 				break;
 			case SDL_MOUSEMOTION:
 				st->mouse_x = event.motion.x;
@@ -1597,7 +1598,7 @@ int main(int argc, char *argv[])
 		// XX measure frame time and subtract
 		SDL_Delay(16);
 
-/*
+		/*
 		frames++;
 		unsigned long long ticks_now = SDL_GetTicks64();
 		if (ticks_now >= ticks_start + 1000) {
@@ -1605,8 +1606,7 @@ int main(int argc, char *argv[])
 			ticks_start = ticks_now;
 			frames = 0;
 		}
-*/
-
+		*/
     }
 
     exit:
