@@ -29,7 +29,7 @@ License: GPL 3(see LICENSE)
 #include "font/noto_sans_mono.h"
 #include "quickpick_icon.h"
 
-#define WRITE_INTERVAL 1.0
+#define WRITE_INTERVAL 0.5f
 #define FONT_SMALL_PX 17*dpi
 #define FONT_MEDIUM_PX 23*dpi
 #define FONT_LARGE_PX 35*dpi
@@ -43,15 +43,6 @@ typedef struct { float x, y, width, height; } Rectangle;
 
 #define WHITE ((Color){255, 255, 255, 255})
 #define BLACK ((Color){0, 0, 0, 255})
-
-// Key codes matching SDL scancodes we care about
-#define KEY_ZERO SDL_SCANCODE_0
-#define KEY_NINE SDL_SCANCODE_9
-#define KEY_KP_0 SDL_SCANCODE_KP_0
-#define KEY_KP_9 SDL_SCANCODE_KP_9
-#define KEY_BACKSPACE SDL_SCANCODE_BACKSPACE
-#define KEY_ESCAPE SDL_SCANCODE_ESCAPE
-#define KEY_ENTER SDL_SCANCODE_RETURN
 
 /*****************/
 
@@ -156,6 +147,7 @@ typedef struct number_select {
 	int value;
 	bool selected;
 	bool dragging;
+	bool clicking;
 	int drag_start_value;
 	int drag_start_y;
 	float shade_v;
@@ -537,8 +529,8 @@ void draw_gradient_circle_and_axes(int x, int y, int r, float fixed_val, struct 
     	float r_ndc = r *(2.0f / scene->viewport_w);
 	    i32 stride = scene->vertex_size;
 	    for (int i=0; i<360; i++) {
-	    	float angle1 = 2*M_PI*i/360.0f;
-	    	float angle2 = 2*M_PI*(i+1)/360.0f;
+	    	float angle1 = 2*F_PI*i/360.0f;
+	    	float angle2 = 2*F_PI*(i+1)/360.0f;
 	    	i32 offset = 3*i*stride;
 	    	data[offset] = x_ndc + r_ndc*cos(angle1);
 	    	data[offset+1] = y_ndc + r_ndc*sin(angle1);
@@ -575,8 +567,8 @@ void draw_gradient_circle_and_axes(int x, int y, int r, float fixed_val, struct 
 	// tick marks
 	float dpi = st->dpi;
 	for (float ang=0.0f; ang<360.0f; ang+=30.0) {
-		float dx = cosf(ang*2*M_PI/360.0f);
-		float dy = sinf(ang*2*M_PI/360.0f);
+		float dx = cosf(ang*2*F_PI/360.0f);
+		float dy = sinf(ang*2*F_PI/360.0f);
 		int length = 5*dpi;
 		Vector2 start = { x + r * dx, y + r * dy };
 		Vector2 end = { start.x + length * dx, start.y + length * dy };
@@ -588,7 +580,7 @@ void draw_gradient_circle_and_axes(int x, int y, int r, float fixed_val, struct 
 	// int  = 4*dpi;
 	// arrowhead
 	float ah_len = 13*dpi;
-	float ah_ang = (180-28)*2*M_PI/360.0f;
+	float ah_ang = (180-28)*2*F_PI/360.0f;
 	float ah_w = 2.0*dpi;
 	Vector2 arrow_end = (Vector2) { x+r+arrow_len, y};
 	add_line(st->main_scene, x+r+12*dpi, y, arrow_end.x, arrow_end.y, arrow_w, gl_color(st->text_color));
@@ -603,11 +595,11 @@ void draw_gradient_circle_and_axes(int x, int y, int r, float fixed_val, struct 
 	float harr_w = 2*dpi;
 	float harr_ang1 = 12;
 	float harr_ang2 = 28;
-	Vector2 harr_end = { x + (r+harr_d+harr_w/2)*cosf(2*M_PI*harr_ang2/360.0f),
-		y - (r+harr_d+harr_w/2)*sinf(2*M_PI*harr_ang2/360.0f) };
-	float harr_dir_ang = (harr_ang2*2*M_PI / 360.0f) + M_PI / 2;
+	Vector2 harr_end = { x + (r+harr_d+harr_w/2)*cosf(2*F_PI*harr_ang2/360.0f),
+		y - (r+harr_d+harr_w/2)*sinf(2*F_PI*harr_ang2/360.0f) };
+	float harr_dir_ang = (harr_ang2*2*F_PI / 360.0f) + F_PI / 2;
 	// arrowhead
-	float adj = 2*M_PI/120;
+	float adj = 2*F_PI/120;
 	// Angles are set up so that left arrowhead goes straight down
 		Vector2 h_ah_left = { harr_end.x /*+ah_len*cosf(harr_dir_ang+ah_ang+adj)*/,
 		harr_end.y-ah_len*sinf(harr_dir_ang+ah_ang+adj)};
@@ -620,7 +612,7 @@ void draw_gradient_circle_and_axes(int x, int y, int r, float fixed_val, struct 
 		gl_color(c3));
 	add_text(st->main_scene, st->text_font_medium, "H", harr_end.x+18*dpi, harr_end.y-2*dpi,
 		gl_color(st->text_color));
-	add_circle_arc(st->main_scene, x, y, r+harr_d+harr_w/2, 2*M_PI*harr_ang1/360.0f, 2*M_PI*harr_ang2/360.0f,
+	add_circle_arc(st->main_scene, x, y, r+harr_d+harr_w/2, 2*F_PI*harr_ang1/360.0f, 2*F_PI*harr_ang2/360.0f,
 		30, 2.0f*dpi, gl_color(st->text_color));
 }
 
@@ -768,7 +760,7 @@ bool number_select(Number_Select *self, Vector2 pos, enum cursor_state cs, int k
 		int fmt_i = 0;
 		int d_i;
 		int d_chars;
-		int len = strlen(self->fmt);
+		int len = (int) strlen(self->fmt);
 		while (fmt_i <= len-2) {
 			if (self->fmt[fmt_i] == '%' && self->fmt[fmt_i+1] == 'd') {
 				d_chars = snprintf(text+text_i, 20-fmt_i, "%d", self->input_n);
@@ -812,12 +804,15 @@ bool number_select(Number_Select *self, Vector2 pos, enum cursor_state cs, int k
 	}
 	// xx self->dragging here ensures that the click that's ending now started on the widget, but not that
 	// it never left.
-	if (hit && cs == CURSOR_STOP && self->dragging) {
+	if (hit && cs == CURSOR_STOP && self->clicking) {
 		self->selected = true;
 	}
 	if (!hit && cs == CURSOR_START) {
 		self->selected = false;
 		self->input_active = false;
+	}
+	if (!hit) {
+		self->clicking = false;
 	}
 	if (self->selected && key) {
 		int key_num = (key >= SDL_SCANCODE_1 && key <= SDL_SCANCODE_0) ? ((key-SDL_SCANCODE_1+1)%10)
@@ -852,6 +847,7 @@ bool number_select(Number_Select *self, Vector2 pos, enum cursor_state cs, int k
 	}
 	if (hit && cs == CURSOR_START) {
 		self->dragging = true;
+		self->clicking = true;
 		self->drag_start_y = pos.y;
 		self->drag_start_value = self->value;
 	}
@@ -937,7 +933,7 @@ void draw_ui_and_respond_input(struct state *st)
 	Vector2 pos = GetMousePosition(st);
 	// consume one keypress per frame
 	int key = st->key_pressed;
-	float anim_vdt = .2;
+	float anim_vdt = 0.2f;
 
 	struct color_info ci = current_color(st);
 	Color cur_color = ci.rgb;
@@ -1025,8 +1021,8 @@ void draw_ui_and_respond_input(struct state *st)
 		ind_x = grad_square_x + st->x_value * (512*dpi);
 		ind_y = grad_square_y + 512*dpi - st->y_value * (512*dpi);
 	} else {
-		ind_x = cx + cr*st->y_value*cosf(st->x_value * 2*M_PI);
-		ind_y = cy - cr*st->y_value*sinf(st->x_value * 2*M_PI);
+		ind_x = cx + cr*st->y_value*cosf(st->x_value * 2*F_PI);
+		ind_y = cy - cr*st->y_value*sinf(st->x_value * 2*F_PI);
 	}
 	add_circle_outline(st->main_scene, ind_x, ind_y, 6*dpi, 20, 1*dpi, gl_color(st->text_color));
 	int r2 = 4*dpi;
@@ -1056,7 +1052,7 @@ void draw_ui_and_respond_input(struct state *st)
 				int y_res = pos.y - y_adj - (grad_square_y + 512*dpi/2);
 				y_res = -y_res;
 				// theta
-				st->x_value = atan2(y_res, x_res) / (2*M_PI);
+				st->x_value = atan2(y_res, x_res) / (2*F_PI);
 				st->x_value = st->x_value < 0 ? 1.0 + st->x_value : st->x_value;
 				// r
 				st->y_value = MIN(MAX(sqrtf(x_res*x_res+y_res*y_res)/(512*dpi/2), 0.0), 1.0);
@@ -1103,7 +1099,7 @@ void draw_ui_and_respond_input(struct state *st)
 			hsv_select.active_colors[i] = bright;
 			hsv_select.inactive_colors[i] = dim;
 		}
-		float sel_hov_brightness = 0.4;
+		float sel_hov_brightness = 0.4f;
 		hsv_select.active_text_color = rgb_select.active_text_color;
 		hsv_select.inactive_text_color = rgb_select.inactive_text_color;
 		rgb_select.hover_brightness = sel_hov_brightness;
@@ -1147,7 +1143,7 @@ void draw_ui_and_respond_input(struct state *st)
 	}
 	// main button
 	static float ind_button_hover_v = 0;
-	float hov_bright = .4;
+	float hov_bright = 0.4f;
 	Color fixed_button_color = color_brightness(light_text_indication_color, ind_button_hover_v * hov_bright);
 	add_rectangle(st->main_scene, ind_button_x, ind_button_y, ind_button_w, ind_button_h,
 		gl_color(fixed_button_color));
@@ -1549,7 +1545,6 @@ int main(int argc, char *argv[])
 					// Don't quit on escape, just pass it through
 				}
 				st->key_pressed = event.key.keysym.scancode;
-				debug("%d\n", st->key_pressed);
 				break;
 			case SDL_MOUSEMOTION:
 				st->mouse_x = event.motion.x;

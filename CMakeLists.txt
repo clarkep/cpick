@@ -1,6 +1,7 @@
 cmake_minimum_required(VERSION 3.11) # FetchContent is available in 3.11+
+
 include(FetchContent)
-# Fix warning about setting timestamps when downloading dependencies
+# Silence warning about setting timestamps when downloading dependencies
 cmake_policy(SET CMP0135 NEW)
 
 project(quickpick)
@@ -46,6 +47,9 @@ else()
 
     target_link_libraries(${PROJECT_NAME} PRIVATE SDL2::SDL2-static)
 endif()
+# if (WIN32)
+#     target_link_libraries(${PROJECT_NAME} PRIVATE SDL2::SDL2main)
+# endif()
 
 target_link_libraries(${PROJECT_NAME} PRIVATE freetype)
 target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
@@ -55,6 +59,10 @@ if(UNIX AND NOT APPLE)  # or: if(NOT WIN32)
 endif()
 
 if(MSVC)
+    set_target_properties(${PROJECT_NAME} PROPERTIES
+        LINK_FLAGS_RELEASE "/SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup"
+        LINK_FLAGS_RELWITHDEBINFO "/SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup"
+    )
     # Supress warnings for integer-float conversions. Otherwise, the default
     # /W3 warnings are enabled.
     target_compile_options(${PROJECT_NAME} PRIVATE /wd4244)
