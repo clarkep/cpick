@@ -316,16 +316,16 @@ void update_color_or_mode(struct state *st, int mode, int fixed, struct color_in
 
 	if (st->mode) {
 		if (fixed == 0) {
-			st->fixed_value = cur_hsv.x / 360.0f;
+			st->fixed_value = cur_hsv.x;
 			st->x_value = cur_hsv.y;
 			st->y_value = cur_hsv.z;
 		} else if (fixed == 1) {
 			st->fixed_value = cur_hsv.y;
-			st->x_value = cur_hsv.x / 360;
+			st->x_value = cur_hsv.x;
 			st->y_value = cur_hsv.z;
 		} else if (fixed == 2) {
 			st->fixed_value = cur_hsv.z;
-			st->x_value = cur_hsv.x / 360;
+			st->x_value = cur_hsv.x;
 			st->y_value = cur_hsv.y;
 		}
 	} else {
