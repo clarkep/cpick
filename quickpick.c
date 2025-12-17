@@ -41,11 +41,10 @@ License: GPL 3(see LICENSE)
 
 /**************/
 
-typedef struct { unsigned char r, g, b, a; } Color;
 typedef struct { float x, y, width, height; } Rectangle;
 
-#define WHITE ((Color){255, 255, 255, 255})
-#define BLACK ((Color){0, 0, 0, 255})
+#define WHITE ((Vector4) { 1.0f, 1.0f, 1.0f, 1.0f })
+#define BLACK ((Vector4){0.0f, 0.0f, 0.0f, 1.0f})
 
 /*****************/
 
@@ -57,7 +56,6 @@ typedef struct state {
 	float dpi;
 	int mode; // rgb(0) or hsv(1)
 	int which_fixed; // red(0), green(1) or blue(2); or hue(0), saturation(1), or value(2)
-	int saved_fixed; // in rgb mode, a fixed hsv to go back to; in hsv mode, an rgb
 	enum cursor_state cursor_state;
 	bool square_dragging;
 	bool val_slider_dragging;
@@ -74,7 +72,7 @@ typedef struct state {
 	current color. */
 	bool from_alternate_value;
 	Vector3 alternate_value;
-	Color text_color;
+	Vector4 text_color;
 	// Font text_font_small;
 	// xx variable width fonts...
 	// Font text_font_medium;
@@ -100,7 +98,7 @@ typedef struct state {
 		int shortened_path_len;
 		unsigned long long offset;
 		int format;
-		Color last_write_color;
+		Vector4 last_write_color;
 		double last_write_time;
 	} outfile;
 	bool debug;
@@ -114,13 +112,13 @@ typedef struct state {
 
 typedef struct tab_select
 {
-	Color active_colors[3];
-	Color inactive_colors[3];
+	Vector4 active_colors[3];
+	Vector4 inactive_colors[3];
 	char labels[3];
 	float hover_brightness;
-	Color active_text_color;
-	Color inactive_text_color;
-	Color border_color;
+	Vector4 active_text_color;
+	Vector4 inactive_text_color;
+	Vector4 border_color;
 	State *st;
 	float anim_vdt;
 	int x;
@@ -162,39 +160,39 @@ char *color_strings[2][3] = { "R", "G", "B", "H", "S", "V" };
 
 /*************************************** CC stuff *************************************************/
 
-// Color utility functions
-Color hex2color(unsigned int hex) {
-	return (Color){
-		(hex >> 24) & 0xFF,
-		(hex >> 16) & 0xFF,
-		(hex >> 8) & 0xFF,
-		hex & 0xFF
+Vector4 hex2color(unsigned int hex) {
+	return (Vector4){
+		((hex >> 24) & 0xFF) / 255.0f,
+		((hex >> 16) & 0xFF) / 255.0f,
+		((hex >> 8) & 0xFF) / 255.0f,
+		(hex & 0xFF) / 255.0f
 	};
 }
 
-Color color_brightness(Color c, float factor) {
-	float r = (float) c.r + ((255-c.r) * factor);
-	float g = (float) c.g + ((255-c.g) * factor);
-	float b = (float) c.b + ((255-c.b) * factor);
-	return (Color){
-		(unsigned char)CLAMP(r, 0, 255),
-		(unsigned char)CLAMP(g, 0, 255),
-		(unsigned char)CLAMP(b, 0, 255),
-		c.a
+Vector4 color_brightness(Vector4 c, float factor) {
+	float r = (float) c.x + ((1.0f - c.x) * factor);
+	float g = (float) c.y + ((1.0f - c.y) * factor);
+	float b = (float) c.z + ((1.0f - c.z) * factor);
+	return (Vector4) {
+		CLAMP(r, 0.0f, 1.0f),
+		CLAMP(g, 0.0f, 1.0f),
+		CLAMP(b, 0.0f, 1.0f),
+		c.w
 	};
 }
 
-Vector3 color_to_hsv(Color c) {
-	float r = c.r / 255.0f;
-	float g = c.g / 255.0f;
-	float b = c.b / 255.0f;
+Vector4 rgb_to_hsv(Vector4 c) {
+	float r = c.x;
+	float g = c.y;
+	float b = c.z;
 
 	float max = MAX(MAX(r, g), b);
 	float min = MIN(MIN(r, g), b);
 	float delta = max - min;
 
-	Vector3 hsv;
-	hsv.z = max; // Value
+	Vector4 hsv;
+	hsv.w = c.w;
+	hsv.z = max; // value
 
 	if (delta < 0.00001f) {
 		hsv.x = 0;
@@ -202,7 +200,7 @@ Vector3 color_to_hsv(Color c) {
 		return hsv;
 	}
 
-	hsv.y = (max > 0) ? (delta / max) : 0; // Saturation
+	hsv.y = (max > 0) ? (delta / max) : 0; // saturation
 
 	if (r >= max) {
 		hsv.x = (g - b) / delta;
@@ -212,36 +210,30 @@ Vector3 color_to_hsv(Color c) {
 		hsv.x = 4.0f + (r - g) / delta;
 	}
 
-	hsv.x *= 60.0f;
-	if (hsv.x < 0) hsv.x += 360.0f;
+	hsv.x /= 6.0f;
+	if (hsv.x < 0) hsv.x += 1.0f;
 
 	return hsv;
 }
 
-Color color_from_hsv(float h, float s, float v) {
+Vector4 hsv_to_rgb(Vector4 hsv)
+{
+	float h = hsv.x;
+	float s = hsv.y;
+	float v = hsv.z;
 	float c = v * s;
-	float x = c * (1 - fabsf(fmodf(h / 60.0f, 2) - 1));
+	float x = c * (1 - fabsf(fmodf(h * 6.0f, 2) - 1));
 	float m = v - c;
 
 	float r, g, b;
-	if (h < 60) { r = c; g = x; b = 0; }
-	else if (h < 120) { r = x; g = c; b = 0; }
-	else if (h < 180) { r = 0; g = c; b = x; }
-	else if (h < 240) { r = 0; g = x; b = c; }
-	else if (h < 300) { r = x; g = 0; b = c; }
+	if (h < 1.0f/6.0f) { r = c; g = x; b = 0; }
+	else if (h < 2.0f/6.0f) { r = x; g = c; b = 0; }
+	else if (h < 3.0f/6.0f) { r = 0; g = c; b = x; }
+	else if (h < 4.0f/6.0f) { r = 0; g = x; b = c; }
+	else if (h < 5.0f/6.0f) { r = x; g = 0; b = c; }
 	else { r = c; g = 0; b = x; }
 
-	return (Color){
-		(unsigned char)((r + m) * 255),
-		(unsigned char)((g + m) * 255),
-		(unsigned char)((b + m) * 255),
-		255
-	};
-}
-
-Vector4 gl_color(Color c)
-{
-	return (Vector4) { c.r / 255.0f, c.g / 255.0f, c.b / 255.0, c.a / 255.0f };
+	return (Vector4){ r + m, g + m, b + m, hsv.w };
 }
 
 bool CheckCollisionPointRec(Vector2 point, Rectangle rec) {
@@ -275,7 +267,7 @@ void myassert(bool p, char *fmt, ...) {
 	}
 }
 
-bool read_color_from_outfile_and_maybe_update_offset(struct state *st, Color *c)
+bool read_color_from_outfile_and_maybe_update_offset(struct state *st, Vector4 *c)
 {
 	char *format = "%02x%02x%02x";
 	FILE *f = fopen(st->outfile.path, "rb");
@@ -292,7 +284,7 @@ bool read_color_from_outfile_and_maybe_update_offset(struct state *st, Color *c)
 	int n_parsed = sscanf(strptr, format, &r, &g, &b);
 	fclose(f);
 	if (n_parsed == 3 && r >= 0 && r <= 255 && g >= 0 && g <= 255 && b >= 0 && b <= 255) {
-		*c = (Color) { r, g, b, 255 };
+		*c = (Vector4) { r / 255.0f, g / 255.0f, b / 255.0f, 1.0f };
 		return true;
 	} else {
 		return false;
@@ -308,27 +300,23 @@ void value_creep_towards(float *val, float target, float amount)
 	}
 }
 
-bool colors_equal(Color c1, Color c2) {
-	return c1.r == c2.r && c1.g == c2.g && c1.b == c2.b && c1.a == c2.a;
+bool vector4_equal(Vector4 c1, Vector4 c2) {
+	return c1.x == c2.x && c1.y == c2.y && c1.z == c2.z && c1.w == c2.w;
 }
 
 struct color_info {
-	Color rgb;
-	Vector3 hsv;
+	Vector4 rgb;
+	Vector4 hsv;
 };
 
 void update_color_or_mode(struct state *st, int mode, int fixed, struct color_info ci)
 {
-	Color cur_color = ci.rgb;
-	Vector3 cur_hsv = ci.hsv;
-/*
-	int tmp = st->which_fixed;
-	st->which_fixed = st->saved_fixed;
-	st->saved_fixed = tmp;
-*/
+	Vector4 cur_rgb = ci.rgb;
+	Vector4 cur_hsv = ci.hsv;
+
 	if (st->mode) {
 		if (fixed == 0) {
-			st->fixed_value = cur_hsv.x / 360;
+			st->fixed_value = cur_hsv.x / 360.0f;
 			st->x_value = cur_hsv.y;
 			st->y_value = cur_hsv.z;
 		} else if (fixed == 1) {
@@ -342,17 +330,17 @@ void update_color_or_mode(struct state *st, int mode, int fixed, struct color_in
 		}
 	} else {
 		if (fixed == 0) {
-			st->fixed_value = cur_color.r / 255.0f;
-			st->x_value = cur_color.g / 255.0f;
-			st->y_value = cur_color.b / 255.0f;
+			st->fixed_value = cur_rgb.x;
+			st->x_value = cur_rgb.y;
+			st->y_value = cur_rgb.z;
 		} else if (fixed == 1) {
-			st->fixed_value = cur_color.g / 255.0f;
-			st->x_value = cur_color.b / 255.0f;
-			st->y_value = cur_color.r / 255.0f;
+			st->fixed_value = cur_rgb.y;
+			st->x_value = cur_rgb.z;
+			st->y_value = cur_rgb.x;
 		} else if (fixed == 2) {
-			st->fixed_value = cur_color.b / 255.0f;
-			st->x_value = cur_color.r / 255.0f;
-			st->y_value = cur_color.g / 255.0f;
+			st->fixed_value = cur_rgb.z;
+			st->x_value = cur_rgb.x;
+			st->y_value = cur_rgb.y;
 		}
 	}
 }
@@ -360,61 +348,49 @@ void update_color_or_mode(struct state *st, int mode, int fixed, struct color_in
 struct color_info current_color(struct state *st)
 {
 	struct color_info res;
-	/*
-	if (st->from_alternate_value) {
-		printf("from alternate value ");
-		if (st->mode == 0) {
-			printf("(h: %d, s:%d%%, v:%d%%)\n", (int) roundf(st->alternate_value.x*360.0f),
-				(int) roundf(st->alternate_value.y*100.0f), (int) roundf(st->alternate_value.z*100.0f));
-		} else if (st->mode == 1) {
-			printf("(r: %d, g: %d, b: %d)\n", (int) roundf(st->alternate_value.x * 255.0f),
-				(int) roundf(st->alternate_value.y * 255.0f), (int) roundf(st->alternate_value.z*255.0f));
-		}
-	} else {
-		printf("from regular value\n");
-	}
-	*/
 	if (st->mode == 0 && !st->from_alternate_value || st->mode == 1 && st->from_alternate_value) {
 		if (st->from_alternate_value) {
-			res.rgb = (Color) { roundf(255.0f*st->alternate_value.x),
-				roundf(255.0f*st->alternate_value.y),
-				roundf(255.0f*st->alternate_value.z), 255 };
+			res.rgb = (Vector4) { st->alternate_value.x, st->alternate_value.y,
+				st->alternate_value.z, 1.0f };
 		} else {
-			int v1 = roundf(255.0f * st->fixed_value);
-			int v2 = roundf(255.0f * st->x_value);
-			int v3 = roundf(255.0f * st->y_value);
+			float v1 = st->fixed_value;
+			float v2 = st->x_value;
+			float v3 = st->y_value;
 			switch (st->which_fixed) {
 			case 0:
-				res.rgb = (Color) { v1, v2, v3, 255 };
+				res.rgb = (Vector4) { v1, v2, v3, 1.0f };
 				break;
 			case 1:
-				res.rgb = (Color) { v3, v1, v2, 255 };
+				res.rgb = (Vector4) { v3, v1, v2, 1.0f };
 				break;
 			case 2:
-				res.rgb = (Color) { v2, v3, v1, 255 };
+				res.rgb = (Vector4) { v2, v3, v1, 1.0f };
 				break;
 			}
 		}
-		res.hsv = color_to_hsv(res.rgb);
+		res.hsv = rgb_to_hsv(res.rgb);
 	} else {
 		if (st->from_alternate_value) {
-			res.hsv = st->alternate_value;
-			res.hsv.x *= 360.0f;
+			res.hsv = (Vector4) { st->alternate_value.x, st->alternate_value.y,
+				st->alternate_value.z, 1.0f };
 		} else {
+			float v1 = st->fixed_value;
+			float v2 = st->x_value;
+			float v3 = st->y_value;
 			switch (st->which_fixed) {
 			case 0:
-				res.hsv = (Vector3) { st->fixed_value * 360, st->x_value, st->y_value };
+				res.hsv = (Vector4) { v1, v2, v3, 1.0f };
 			break;
 			case 1:
-				res.hsv = (Vector3) { st->x_value * 360, st->fixed_value, st->y_value };
+				res.hsv = (Vector4) { v2, v1, v3, 1.0f };
 			break;
 			case 2:
 				// x=theta, y=r
-				res.hsv = (Vector3) { st->x_value * 360, st->y_value, st->fixed_value };
+				res.hsv = (Vector4) { v2, v3, v1, 1.0f };
 			break;
 			}
 		}
-		res.rgb = color_from_hsv(res.hsv.x, res.hsv.y, res.hsv.z);
+		res.rgb = hsv_to_rgb(res.hsv);
 	}
 	if (st->from_alternate_value) {
 		update_color_or_mode(st, st->mode, st->which_fixed, res);
@@ -422,10 +398,11 @@ struct color_info current_color(struct state *st)
 	return res;
 }
 
-void write_color_to_file(struct state *st, Color color)
+void write_color_to_file(struct state *st, Vector4 color)
 {
 	char color_text[10];
-	sprintf(color_text, "%02x%02x%02x", color.r, color.g, color.b);
+	sprintf(color_text, "%02x%02x%02x", (int)(color.x*255.0f), (int)(color.y*255.0f),
+		(int) (color.z*255.0f));
 
 	FILE *f = fopen(st->outfile.path, "r+b");
 	myassert(f, "Failed to open file: %s.\n", st->outfile.path);
@@ -575,7 +552,7 @@ void draw_gradient_circle_and_axes(int x, int y, int r, float fixed_val, struct 
 		int length = 5*dpi;
 		Vector2 start = { x + r * dx, y + r * dy };
 		Vector2 end = { start.x + length * dx, start.y + length * dy };
-		add_line(st->main_scene, start.x, start.y, end.x, end.y, 2.0*dpi, gl_color(st->text_color));
+		add_line(st->main_scene, start.x, start.y, end.x, end.y, 2.0*dpi, st->text_color);
 	}
 	// s arrow
 	int arrow_len = 60*dpi;
@@ -586,13 +563,13 @@ void draw_gradient_circle_and_axes(int x, int y, int r, float fixed_val, struct 
 	float ah_ang = (180-28)*2*F_PI/360.0f;
 	float ah_w = 2.0*dpi;
 	Vector2 arrow_end = (Vector2) { x+r+arrow_len, y};
-	add_line(st->main_scene, x+r+12*dpi, y, arrow_end.x, arrow_end.y, arrow_w, gl_color(st->text_color));
+	add_line(st->main_scene, x+r+12*dpi, y, arrow_end.x, arrow_end.y, arrow_w, st->text_color);
 	Vector2 ah_left = { arrow_end.x + ah_len*cosf(ah_ang), arrow_end.y + ah_len*sinf(ah_ang)};
 	Vector2 ah_right = { arrow_end.x + ah_len*cosf(-ah_ang), arrow_end.y + ah_len*sinf(-ah_ang)};
-	add_line(st->main_scene, arrow_end.x, arrow_end.y, ah_left.x, ah_left.y, ah_w, gl_color(st->text_color));
-	add_line(st->main_scene, arrow_end.x, arrow_end.y, ah_right.x, ah_right.y, ah_w, gl_color(st->text_color));
+	add_line(st->main_scene, arrow_end.x, arrow_end.y, ah_left.x, ah_left.y, ah_w, st->text_color);
+	add_line(st->main_scene, arrow_end.x, arrow_end.y, ah_right.x, ah_right.y, ah_w, st->text_color);
 	add_text(st->main_scene, st->text_font_medium, "S", arrow_end.x-16.0*dpi, arrow_end.y-20.0*dpi,
-		gl_color(st->text_color));
+		st->text_color);
 	// h arrow
 	float harr_d = 30*dpi;
 	float harr_w = 2*dpi;
@@ -608,15 +585,15 @@ void draw_gradient_circle_and_axes(int x, int y, int r, float fixed_val, struct 
 		harr_end.y-ah_len*sinf(harr_dir_ang+ah_ang+adj)};
 	Vector2 h_ah_right = { harr_end.x+ah_len*cosf(harr_dir_ang-ah_ang+adj),
 		harr_end.y-ah_len*sinf(harr_dir_ang-ah_ang+adj)};
-	Color c3 = st->text_color;
+	Vector4 c3 = st->text_color;
 	// Todo: the arrowhead might still be a little off of the arrow body. Renderdoc it.
-	add_line(st->main_scene, harr_end.x, harr_end.y, h_ah_left.x, h_ah_left.y, ah_w, gl_color(c3));
+	add_line(st->main_scene, harr_end.x, harr_end.y, h_ah_left.x, h_ah_left.y, ah_w, c3);
 	add_line(st->main_scene, harr_end.x, harr_end.y, h_ah_right.x, h_ah_right.y, ah_w,
-		gl_color(c3));
+		c3);
 	add_text(st->main_scene, st->text_font_medium, "H", harr_end.x+18*dpi, harr_end.y-2*dpi,
-		gl_color(st->text_color));
+		st->text_color);
 	add_circle_arc(st->main_scene, x, y, r+harr_d+harr_w/2, 2*F_PI*harr_ang1/360.0f, 2*F_PI*harr_ang2/360.0f,
-		30, 2.0f*dpi, gl_color(st->text_color));
+		30, 2.0f*dpi, st->text_color);
 }
 
 // TODO: parameter for 512 vs etc ?
@@ -627,9 +604,9 @@ void draw_axes(int x, int y, int w, int h, struct state *st)
 	int tick_width = 2*dpi;
 	int y_tick_len = w/4;
 	int x_tick_len = h/4;
-	Color tick_color = st->text_color;
+	Vector4 tick_color = st->text_color;
 	int label_size = 30*dpi;
-	Color label_color = st->text_color;
+	Vector4 label_color = st->text_color;
 
 	char *x_label;
 	char *y_label;
@@ -642,18 +619,18 @@ void draw_axes(int x, int y, int w, int h, struct state *st)
 	}
 	// x axis label
 	add_text(st->main_scene, st->text_font_medium, x_label,
-			   x + 512*dpi/2 - label_size, y + 512*dpi + h, gl_color(label_color));
+			   x + 512*dpi/2 - label_size, y + 512*dpi + h, label_color);
 	// y axis label
 	add_text(st->main_scene, st->text_font_medium, y_label,
-			   x - h, y + 512*dpi/2, gl_color(label_color));
+			   x - h, y + 512*dpi/2, label_color);
 	// x axis
 	for (int ix = x; ix < (x+512*dpi); ix += tick_sep) {
-		add_rectangle(st->main_scene, ix, y+512*dpi, tick_width, x_tick_len, gl_color(tick_color));
+		add_rectangle(st->main_scene, ix, y+512*dpi, tick_width, x_tick_len, tick_color);
 	}
 	// y axis
 	for (int yi = 0; yi < (512*dpi); yi += tick_sep) {
 		add_rectangle(st->main_scene, x-y_tick_len, y + 512*dpi - yi - tick_width, y_tick_len,
-			tick_width, gl_color(tick_color));
+			tick_width, tick_color);
 	}
 }
 
@@ -662,17 +639,17 @@ bool tab_select(Tab_Select *self, Vector2 pos, enum cursor_state cs)
 	State *st = self->st;
 	float dpi = st->dpi;
 	int i = self->sel_i;
-	Color *active = self->active_colors;
-	Color *inactive = self->inactive_colors;
-	Color active_text = self->active_text_color;
-	Color inactive_text = self->inactive_text_color;
+	Vector4 *active = self->active_colors;
+	Vector4 *inactive = self->inactive_colors;
+	Vector4 active_text = self->active_text_color;
+	Vector4 inactive_text = self->inactive_text_color;
 	float *hover_v = self->hover_v;
-	Color color1 = i == 0 ? active[0] : color_brightness(inactive[0], self->hover_brightness*hover_v[0]);
-	Color color2 = i == 1 ? active[1] : color_brightness(inactive[1], self->hover_brightness*hover_v[1]);
-	Color color3 = i == 2 ? active[2] : color_brightness(inactive[2], self->hover_brightness*hover_v[2]);
-	Color text_color1 = i == 0 ? active_text : color_brightness(inactive_text, self->hover_brightness*hover_v[0]);
-	Color text_color2 = i == 1 ? active_text : color_brightness(inactive_text, self->hover_brightness*hover_v[1]);
-	Color text_color3 = i == 2 ? active_text : color_brightness(inactive_text, self->hover_brightness*hover_v[2]);
+	Vector4 color1 = i == 0 ? active[0] : color_brightness(inactive[0], self->hover_brightness*hover_v[0]);
+	Vector4 color2 = i == 1 ? active[1] : color_brightness(inactive[1], self->hover_brightness*hover_v[1]);
+	Vector4 color3 = i == 2 ? active[2] : color_brightness(inactive[2], self->hover_brightness*hover_v[2]);
+	Vector4 text_color1 = i == 0 ? active_text : color_brightness(inactive_text, self->hover_brightness*hover_v[0]);
+	Vector4 text_color2 = i == 1 ? active_text : color_brightness(inactive_text, self->hover_brightness*hover_v[1]);
+	Vector4 text_color3 = i == 2 ? active_text : color_brightness(inactive_text, self->hover_brightness*hover_v[2]);
 	char text[2] = "X";
 	float x = self->x;
 	float tw = self->w / 3.0;
@@ -685,12 +662,12 @@ bool tab_select(Tab_Select *self, Vector2 pos, enum cursor_state cs)
 	float text_y = y + h/2.0f + FONT_SMALL_PX*CENTER_EM;
 	Vector2 left_corners[4] = { { x, y }, { x, y+h }, { x+tw, y+h }, { x+tw, y }};
 	bool left_rounded[4] = { self->top, !self->top, false, false };
-	add_rounded_quad(st->main_scene, left_corners, left_rounded, rnd, segs, gl_color(color1));
+	add_rounded_quad(st->main_scene, left_corners, left_rounded, rnd, segs, color1);
 	add_rounded_quad_outline(st->main_scene, left_corners, left_rounded, rnd, segs, 1.0f,
-		gl_color(self->border_color));
+		self->border_color);
 	text[0] = self->labels[0];
 	add_text(st->main_scene, st->text_font_small, text, x + (tw - st->small_char_width)/2.0,
-		text_y, gl_color(text_color1));
+		text_y, text_color1);
 	float x_mid = x + tw;
 	int last_x = x_mid + tw;
 	int end_x = self->x + self->w;
@@ -698,19 +675,19 @@ bool tab_select(Tab_Select *self, Vector2 pos, enum cursor_state cs)
 	Vector2 right_corners[4] = { { last_x, y }, { last_x, y+h }, { last_x+last_w, y+h },
 		{ last_x+last_w, y } };
 	bool right_rounded[4] = { false, false, !self->top, self->top };
-	add_rounded_quad(st->main_scene, right_corners, right_rounded, rnd, segs, gl_color(color3));
+	add_rounded_quad(st->main_scene, right_corners, right_rounded, rnd, segs, color3);
 	add_rounded_quad_outline(st->main_scene, right_corners, right_rounded, rnd, segs, 1.0f,
-		gl_color(self->border_color));
+		self->border_color);
 	text[0] = self->labels[2];
 	add_text(st->main_scene, st->text_font_small, text, last_x + (last_w - st->small_char_width)/2.0,
-		text_y, gl_color(text_color3));
+		text_y, text_color3);
 
-	add_rectangle(st->main_scene, x_mid, self->y, tw, self->h, gl_color(color2));
+	add_rectangle(st->main_scene, x_mid, self->y, tw, self->h, color2);
 	add_rectangle_outline(st->main_scene, x_mid, self->y, tw, self->h, 1*dpi,
-		gl_color(self->border_color));
+		self->border_color);
 	text[0] = self->labels[1];
 	add_text(st->main_scene, st->text_font_small, text, x_mid + (tw - st->small_char_width)/2.0,
-		text_y, gl_color(text_color2));
+		text_y, text_color2);
 
 	bool updated = false;
 	float hover_targets[3] = { 0.0f, 0.0f, 0.0f };
@@ -744,8 +721,8 @@ bool number_select(Number_Select *self, Vector2 pos, enum cursor_state cs, int k
 	self->w = (st->medium_char_width + 1.5*dpi) * n_chars;
 	self->h = 30*dpi;
 	*/
-	int a = st->text_color.r < 128 ? 64 + 64*self->shade_v : 196 - 64*self->shade_v;
-	Color hl_color = { a, a, a, 128*self->shade_v };
+	float a = st->text_color.x < .5f ? .25f + .25f*self->shade_v : .75f - .25f*self->shade_v;
+	Vector4 hl_color = { a, a, a, .5f*self->shade_v };
 
 	i32 text_y = self->y + self->h/2.0f + FONT_MEDIUM_PX*CENTER_EM;
 
@@ -753,7 +730,7 @@ bool number_select(Number_Select *self, Vector2 pos, enum cursor_state cs, int k
 	float rnd = 7.0f;
 	i32 segs = 15;
 	add_rounded_rectangle(st->main_scene, self->x - 10*dpi, self->y, self->w, self->h,
-		rnd, segs, gl_color(hl_color));
+		rnd, segs, hl_color);
 	i32 font_h = 30*dpi;
 	char text[21];
 	memset(text, 0, 21);
@@ -784,21 +761,21 @@ bool number_select(Number_Select *self, Vector2 pos, enum cursor_state cs, int k
 		int x = self->x;
 		char c = text[d_i];
 		text[d_i] = '\0';
-		add_text(st->main_scene, st->text_font_medium, text, x, text_y, gl_color(st->text_color));
+		add_text(st->main_scene, st->text_font_medium, text, x, text_y, st->text_color);
 		text[d_i] = c;
 		x += d_i*(st->medium_char_width + 1.5*dpi);
 		c = text[d_i + d_chars];
 		// xx GetGlColor at least
 		add_text(st->main_scene, st->text_font_medium, &text[d_i], x, text_y,
-			gl_color(st->text_color.r < 128 ? hex2color(0x303030ff) : hex2color(0xd8d8d8ff)));
+			st->text_color.x < 0.5f ? hex2color(0x303030ff) : hex2color(0xd8d8d8ff));
 		text[d_i + d_chars] = c;
 		x += d_chars * (st->medium_char_width + 1.5*dpi);
 		add_text(st->main_scene, st->text_font_medium, &text[d_i+d_chars], x, text_y,
-			gl_color(st->text_color));
+			st->text_color);
 	} else {
 		int n_chars = snprintf(text, 20, self->fmt, self->input_active ? self->input_n : self->value);
 		add_text(st->main_scene, st->text_font_medium, text, self->x, text_y,
-			gl_color(st->text_color));
+			st->text_color);
 	}
 	bool hit = CheckCollisionPointRec(pos, (Rectangle) { self->x, self->y, self->w, self->h });
 	// xx can this logic be simplified?
@@ -909,12 +886,9 @@ bool number_select_immargs(Number_Select *ns, char *fmt, int min, int max, bool 
 
 float luminance(unsigned int r, unsigned int g, unsigned int b)
 {
-  float rf = r / 255.0f;
-  float gf = g / 255.0f;
-  float bf = b / 255.0f;
-  float rs = rf <= 0.3928f ? rf / 12.92f : powf((rf+0.055f)/1.055f, 2.4f);
-  float gs = gf <= 0.3928f ? gf / 12.92f : powf((gf+0.055f)/1.055f, 2.4f);
-  float bs = bf <= 0.3928f ? bf / 12.92f : powf((bf+0.055f)/1.055f, 2.4f);
+  float rs = r <= 0.3928f ? r / 12.92f : powf((r+0.055f)/1.055f, 2.4f);
+  float gs = g <= 0.3928f ? g / 12.92f : powf((g+0.055f)/1.055f, 2.4f);
+  float bs = b <= 0.3928f ? b / 12.92f : powf((b+0.055f)/1.055f, 2.4f);
   return 0.2126f * rs + 0.7152f * gs + 0.0722f * bs;
 }
 
@@ -939,35 +913,41 @@ void draw_ui_and_respond_input(struct state *st)
 	float anim_vdt = 0.2f;
 
 	struct color_info ci = current_color(st);
-	Color cur_color = ci.rgb;
-	Vector3 cur_hsv = ci.hsv;
+	Vector4 cur_color = ci.rgb;
+	Vector4 cur_hsv = ci.hsv;
 	// ClearBackground( cur_color );
-	glClearColor(cur_color.r/255.0f, cur_color.g/255.0f, cur_color.b/255.0f, 1.0f);
+	glClearColor(cur_color.x, cur_color.y, cur_color.z, 1.0f);
 	glClear(GL_COLOR_BUFFER_BIT);
 
 	float dpi = st->dpi;
-	if (luminance(cur_color.r, cur_color.g, cur_color.b) >= 0.179) {
+	if (luminance(cur_color.x, cur_color.y, cur_color.z) >= 0.179) {
 		st->text_color = BLACK;
 	} else {
 		st->text_color = WHITE;
 	}
 
+/*
 	int dark_text_bright_grey_bg = 208;
 	int dark_text_dim_grey_bg = 144;
 	int light_text_bright_grey_bg = 160;
 	int light_text_dim_grey_bg = 80;
-	Color fixed_indication_color;
-	Color light_text_indication_color;
+*/
+	float dark_text_bright_grey_bg = 208.0f / 255.0f;
+	float dark_text_dim_grey_bg = 144.0f / 255.0f;
+	float light_text_bright_grey_bg = 160.0f / 255.0f;
+	float light_text_dim_grey_bg = 80.0f / 255.0f;
+	Vector4 fixed_indication_color;
+	Vector4 light_text_indication_color;
 	if (st->mode == 0) {
 		int wf = st->which_fixed;
 		int rgb_fixed_ind[] = { 0xc00000ff, 0x00c000ff, 0x0080ffff };
 		fixed_indication_color = hex2color(rgb_fixed_ind[wf]);
 		light_text_indication_color = fixed_indication_color;
 	} else {
-		int a = st->text_color.r < 128 ? dark_text_bright_grey_bg : light_text_bright_grey_bg;
-		int b = light_text_bright_grey_bg;
-		fixed_indication_color = (Color) { a, a, a, 255 };
-		light_text_indication_color = (Color) { b, b, b, 255 };
+		float a = st->text_color.x < .05 ? dark_text_bright_grey_bg : light_text_bright_grey_bg;
+		float b = light_text_bright_grey_bg;
+		fixed_indication_color = (Vector4) { a, a, a, 1.0f };
+		light_text_indication_color = (Vector4) { b, b, b, 1.0f };
 	}
 
 	// output file indicator
@@ -981,14 +961,14 @@ void draw_ui_and_respond_input(struct state *st)
 	Vector2 out_ind_verts[4] = { { out_ind_bottom_x, out_ind_bottom_y }, { out_ind_bottom_x + out_ind_bottom_w, out_ind_bottom_y},
 	{ out_ind_top_x + out_ind_top_w, out_ind_top_y }, { out_ind_top_x, out_ind_top_y }};
 	bool out_ind_rounded[4] = { true, true, false, false };
-	Color out_ind_bgcolor = { 48, 48, 48, 192 };
+	Vector4 out_ind_bgcolor = hex2color(0x303030c0);
 	if (st->outfile.path) {
 		i32 text_x = out_ind_bottom_x + (out_ind_bottom_w - st->outfile.shortened_path_len*(st->small_char_width+1.0*dpi))/2.0f;
 		i32 text_y = out_ind_top_y + out_ind_h/2.0f + FONT_SMALL_PX*CENTER_EM;
 		add_rounded_quad(st->main_scene, out_ind_verts, out_ind_rounded, 12*dpi, 12,
-			gl_color(out_ind_bgcolor));
+			out_ind_bgcolor);
 		add_text(st->main_scene, st->text_font_small, st->outfile.shortened_path,
-			text_x, text_y, gl_color(WHITE));
+			text_x, text_y, WHITE);
 	}
 
 	// gradient
@@ -1027,13 +1007,13 @@ void draw_ui_and_respond_input(struct state *st)
 		ind_x = cx + cr*st->y_value*cosf(st->x_value * 2*F_PI);
 		ind_y = cy - cr*st->y_value*sinf(st->x_value * 2*F_PI);
 	}
-	add_circle_outline(st->main_scene, ind_x, ind_y, 6*dpi, 20, 1*dpi, gl_color(st->text_color));
+	add_circle_outline(st->main_scene, ind_x, ind_y, 6*dpi, 20, 1*dpi, st->text_color);
 	int r2 = 4*dpi;
 	int r3 = 8*dpi;
-	add_line(st->main_scene, ind_x - r3, ind_y, ind_x - r2, ind_y, 1*dpi, gl_color(st->text_color));
-	add_line(st->main_scene, ind_x + r2, ind_y, ind_x + r3, ind_y, 1*dpi, gl_color(st->text_color));
-	add_line(st->main_scene, ind_x, ind_y - r3, ind_x, ind_y - r2, 1*dpi, gl_color(st->text_color));
-	add_line(st->main_scene, ind_x, ind_y + r2, ind_x, ind_y + r3, 1*dpi, gl_color(st->text_color));
+	add_line(st->main_scene, ind_x - r3, ind_y, ind_x - r2, ind_y, 1*dpi, st->text_color);
+	add_line(st->main_scene, ind_x + r2, ind_y, ind_x + r3, ind_y, 1*dpi, st->text_color);
+	add_line(st->main_scene, ind_x, ind_y - r3, ind_x, ind_y - r2, 1*dpi, st->text_color);
+	add_line(st->main_scene, ind_x, ind_y + r2, ind_x, ind_y + r3, 1*dpi, st->text_color);
 	if (st->cursor_state == CURSOR_START || st->square_dragging) {
 		if (!st->square_dragging) {
 			Rectangle rec = {grad_square_x, grad_square_y, 512*dpi, 512*dpi};
@@ -1076,7 +1056,7 @@ void draw_ui_and_respond_input(struct state *st)
 	int ind_button_h = 75*dpi;
 	// int ind_tabs_y = ind_button_y + ind_button_h - ind_tabs_h - 1;
 	int ind_tabs_y = ind_button_y + ind_button_h;
-	Color ind_border_color = hex2color(0xb0b0b0ff);
+	Vector4 ind_border_color = hex2color(0xb0b0b0ff);
 	// tabs
 	static Tab_Select rgb_select;
 	static Tab_Select hsv_select;
@@ -1094,10 +1074,10 @@ void draw_ui_and_respond_input(struct state *st)
 		rgb_select.labels[1] = 'G';
 		rgb_select.labels[2] = 'B';
 		rgb_select.top = true;
-		int a = light_text_bright_grey_bg;
-		int b = light_text_dim_grey_bg;
-		Color bright = { a, a, a, 255 };
-		Color dim = { b, b, b, 255 };
+		float a = light_text_bright_grey_bg;
+		float b = light_text_dim_grey_bg;
+		Vector4 bright = { a, a, a, 1.0f };
+		Vector4 dim = { b, b, b, 1.0f };
 		for (int i=0; i<3; i++) {
 			hsv_select.active_colors[i] = bright;
 			hsv_select.inactive_colors[i] = dim;
@@ -1147,16 +1127,15 @@ void draw_ui_and_respond_input(struct state *st)
 	// main button
 	static float ind_button_hover_v = 0;
 	float hov_bright = 0.4f;
-	Color fixed_button_color = color_brightness(light_text_indication_color, ind_button_hover_v * hov_bright);
+	Vector4 fixed_button_color = color_brightness(light_text_indication_color, ind_button_hover_v * hov_bright);
 	add_rectangle(st->main_scene, ind_button_x, ind_button_y, ind_button_w, ind_button_h,
-		gl_color(fixed_button_color));
+		fixed_button_color);
 	add_rectangle_outline(st->main_scene, ind_button_x, ind_button_y, ind_button_w, ind_button_h,
-		1*dpi, gl_color(ind_border_color));
-	Color white = { 255, 255, 255, 255 };
+		1*dpi, ind_border_color);
 	i32 ind_text_x = ind_button_x+ind_button_w/2.0f-st->large_char_width/2.0f;
 	i32 ind_text_y = ind_button_y + ind_button_h/2.0f+FONT_LARGE_PX*CENTER_EM;
 	add_text(st->main_scene, st->text_font_large, color_strings[st->mode][st->which_fixed],
-		ind_text_x, ind_text_y, gl_color(white));
+		ind_text_x, ind_text_y, WHITE);
 	if (CheckCollisionPointRec(pos, (Rectangle) { ind_button_x, ind_button_y, ind_button_w,
 		ind_tabs_y-ind_button_y})) {
 		if (st->cursor_state == CURSOR_START) {
@@ -1189,10 +1168,10 @@ void draw_ui_and_respond_input(struct state *st)
 		int bar_h = 8*dpi;
 		int circle_r = 15*dpi;
 		add_rectangle(st->main_scene, val_slider_x, val_slider_y-bar_h/2.0f, val_slider_w, bar_h,
-			gl_color(st->text_color));
+			st->text_color);
 		Vector2 circle_center = {  };
 		add_circle(st->main_scene, val_slider_x + val_slider_offset, val_slider_y, 15*dpi,
-			30, gl_color(fixed_indication_color));
+			30, fixed_indication_color);
 		if (st->cursor_state == CURSOR_START || st->val_slider_dragging) {
 			if (!st->val_slider_dragging && CheckCollisionPointRec(pos,
 				(Rectangle) { val_slider_x - circle_r, val_slider_y-val_slider_h/2.0f,
@@ -1213,48 +1192,50 @@ void draw_ui_and_respond_input(struct state *st)
 	int r_select_x = (st->screenWidth - st->medium_label_width)/2.0f;
 	int r_select_y = val_slider_y + 90*dpi;
 	static Number_Select r_num_select;
-	r_num_select.value = cur_color.r;
+	r_num_select.value = cur_color.x * 255.0f;
 	if (number_select_immargs(&r_num_select, "r:%d ", 0, 255, false, st, anim_vdt,
 		r_select_x, r_select_y, rgb_select_w, 30*dpi, 800.0f / 256.0f, pos, st->cursor_state, key)) {
 		rgb_num_select_changed = true;
 	}
 	static Number_Select g_num_select;
-	g_num_select.value = cur_color.g;
+	g_num_select.value = cur_color.y * 255.0f;
 	if (number_select_immargs(&g_num_select, "g:%d ", 0, 255, false, st, anim_vdt,
 		r_num_select.x+r_num_select.w, r_num_select.y, rgb_select_w, 30*dpi, 800.0f / 256.0f,
 		pos, st->cursor_state, key)) {
 		rgb_num_select_changed = true;
 	}
 	static Number_Select b_num_select;
-	b_num_select.value = cur_color.b;
+	b_num_select.value = cur_color.z * 255.0f;
 	if (number_select_immargs(&b_num_select, "b:%d ", 0, 255, false, st, anim_vdt,
 		g_num_select.x+g_num_select.w, g_num_select.y, rgb_select_w, 30*dpi, 800.0f / 256.0f,
 		pos, st->cursor_state, key)) {
 		rgb_num_select_changed = true;
 	}
 	if (rgb_num_select_changed) {
-		Color new_rgb = { r_num_select.value,  g_num_select.value, b_num_select.value };
+		Vector4 new_rgb = { r_num_select.value / 255.0f,  g_num_select.value / 255.0f,
+			b_num_select.value / 255.0f, 1.0f };
 		if (st->mode == 1) {
 			st->from_alternate_value = true;
-			st->alternate_value = (Vector3) { new_rgb.r / 255.0f, new_rgb.g / 255.0f, new_rgb.b / 255.0f };
+			st->alternate_value = (Vector3) { new_rgb.x, new_rgb.y, new_rgb.z };
 		}
-		Vector3 new_hsv = color_to_hsv(new_rgb);
+		Vector4 new_hsv = rgb_to_hsv(new_rgb);
 		struct color_info new_ci = { new_rgb, new_hsv };
 		update_color_or_mode(st, st->mode, st->which_fixed, new_ci);
 	}
 
 	char value[40];
-	sprintf(value, "hex:#%02x%02x%02x", cur_color.r, cur_color.g, cur_color.b);
+	sprintf(value, "hex:#%02x%02x%02x", (int)(cur_color.x*255.0f), (int)(cur_color.y*255.0f),
+		(int)(cur_color.z*255.0f));
 	int hex_label_x = b_num_select.x + b_num_select.w;
 	int hex_label_y = r_num_select.y + r_num_select.h/2.0f + FONT_MEDIUM_PX*CENTER_EM;
 	i32 font_h = 30*dpi;
 	add_text(st->main_scene, st->text_font_medium, value, hex_label_x, hex_label_y,
-		gl_color(st->text_color));
+		st->text_color);
 
 	bool hsv_num_select_changed = false;
 	int hsv_select_w = 7*(st->medium_char_width + 1.5*dpi);
 	static Number_Select h_num_select;
-	h_num_select.value = cur_hsv.x;
+	h_num_select.value = cur_hsv.x * 360.0f;
 	if (number_select_immargs(&h_num_select, "h:%d\xc2\xb0", 0, 359, true, st, anim_vdt,
 		r_num_select.x, r_num_select.y + 35*dpi, hsv_select_w, 30*dpi, 800.0f/360.0f,
 		pos, st->cursor_state, key)) {
@@ -1275,13 +1256,13 @@ void draw_ui_and_respond_input(struct state *st)
 		hsv_num_select_changed = true;
 	}
 	if (hsv_num_select_changed) {
-		Vector3 new_hsv = { h_num_select.value, s_num_select.value / 100.0f, v_num_select.value / 100.0f };
+		Vector4 new_hsv = { h_num_select.value / 360.0f, s_num_select.value / 100.0f,
+			v_num_select.value / 100.0f, 1.0f };
 		if (st->mode == 0) {
 			st->from_alternate_value = true;
-			st->alternate_value = new_hsv;
-			st->alternate_value.x /= 360.0f;
+			st->alternate_value = (Vector3) { new_hsv.x, new_hsv.y, new_hsv.z };
 		}
-		Color new_rgb = color_from_hsv(new_hsv.x, new_hsv.y, new_hsv.z);
+		Vector4 new_rgb = hsv_to_rgb(new_hsv);
 		struct color_info new_ci = { new_rgb, new_hsv };
 		update_color_or_mode(st, st->mode, st->which_fixed, new_ci);
 	}
@@ -1291,7 +1272,7 @@ void draw_ui_and_respond_input(struct state *st)
 
 	double now = GetTime(st);
 	if (st->outfile.path && now - st->outfile.last_write_time > WRITE_INTERVAL &&
-		!colors_equal(cur_color, st->outfile.last_write_color)) {
+		!vector4_equal(cur_color, st->outfile.last_write_color)) {
 		write_color_to_file(st, cur_color);
 		st->outfile.last_write_color = cur_color;
 		st->outfile.last_write_time = now;
@@ -1387,10 +1368,9 @@ int main(int argc, char *argv[])
 	struct state *st = (struct state *) calloc(1, sizeof(struct state));
 	st->screenWidth = 680;
 	st->screenHeight = 860;
-	st->mode = 1;
-	st->which_fixed = 2;
-	st->saved_fixed = 0;
-	st->fixed_value = 1.0;
+	st->mode = 0;
+	st->which_fixed = 0;
+	st->fixed_value = 0.0f;
 	st->x_value = 0;
 	st->y_value = 0;
 	st->square_dragging = false;
@@ -1399,7 +1379,7 @@ int main(int argc, char *argv[])
 	st->outfile.path = NULL;
 	st->outfile.offset = 0;
 	st->outfile.format = 0;
-	st->outfile.last_write_color = (Color) { 0, 0, 0, 255 };
+	st->outfile.last_write_color = (Vector4) { 0, 0, 0, 1.0f };
 	st->debug = false;
 
 	for (int i=1; i<argc; i++) {
@@ -1500,12 +1480,12 @@ int main(int argc, char *argv[])
 		st->outfile.shortened_path_len = str_n - remove;
 		assert(st->outfile.shortened_path_len == strlen(st->outfile.shortened_path));
 
-		Color start_color;
+		Vector4 start_color;
 		bool success = read_color_from_outfile_and_maybe_update_offset(st, &start_color);
 		if (success) {
 			struct color_info ci;
 			ci.rgb = start_color;
-			ci.hsv = color_to_hsv(start_color);
+			ci.hsv = rgb_to_hsv(start_color);
 			update_color_or_mode(st, st->mode, st->which_fixed, ci);
 		} else {
 			// since we failed to read, we probably shouldn't write
