@@ -5,7 +5,7 @@
 #include <stdbool.h>
 #include <math.h>
 /// #include <GL/glew.h>
-#include "glad.h"
+#include <glad/glad.h>
 #include "util.h"
 #include "draw.h"
 
@@ -51,14 +51,14 @@ Font_Atlas *create_font_atlas(FT_Face ft_face,  u32 *charset, u32 charset_n, u32
 	i32 max_texture_size; //1d 2d textures
 	glGetIntegerv(GL_MAX_TEXTURE_SIZE, &max_texture_size);
 	res->data_w = MIN(total_width, max_texture_size);
-	u32 rows = total_width / max_texture_size + 1;
+	i32 rows = total_width / max_texture_size + 1;
 	// If rows * max_height_pix > max_texture_size, we will *probably* overflow, but let's try it
 	// anyway and catch overflow later.
-	res->data_h = MIN(rows * max_height_pix, max_texture_size);
+	res->data_h = MIN((u64) rows * (u64) max_height_pix, (u64) max_texture_size);
 	res->data = malloc((u64) res->data_w * (u64) res->data_h);
-	debug("Packing %u characters into a font atlas of size (%u, %u)(%u row%s). Character bbox: "
-		"(%u, %u).\n", charset_n, res->data_w, res->data_h, rows, rows > 1 ? "s" : "", max_width_pix,
-		max_height_pix);
+	// debug("Packing %u characters into a font atlas of size (%u, %u)(%u row%s). Character bbox: "
+	// 	"(%u, %u).\n", charset_n, res->data_w, res->data_h, rows, rows > 1 ? "s" : "", max_width_pix,
+	// 	max_height_pix);
 
     res->min_descent = INT_MAX;
     res->max_ascent = INT_MIN;
@@ -81,7 +81,7 @@ Font_Atlas *create_font_atlas(FT_Face ft_face,  u32 *charset, u32 charset_n, u32
         FT_GlyphSlotRec *slot = ft_face->glyph;
 		FT_Bitmap bitmap = ft_face->glyph->bitmap;
 
-		if (x + bitmap.width >= res->data_w) {
+		if (x + (i32) bitmap.width >= res->data_w) {
 			// xx I heard there was an even better algorithm than this...
 			x = 1;
 			y += row_height;
@@ -92,7 +92,7 @@ Font_Atlas *create_font_atlas(FT_Face ft_face,  u32 *charset, u32 charset_n, u32
 		}
 
 		for (i32 r=bitmap.rows-1, res_r=0; r>=0; r--, res_r++) {
-			for (i32 c=0; c<bitmap.width; c++) {
+			for (i32 c=0; c<(i32)bitmap.width; c++) {
 				res->data[(y+res_r)*(u64)res->data_w + (x+c)] = bitmap.buffer[r*bitmap.pitch+c];
 			}
 		}
@@ -112,7 +112,7 @@ Font_Atlas *create_font_atlas(FT_Face ft_face,  u32 *charset, u32 charset_n, u32
 			slot->bitmap_left, slot->bitmap_top, slot->advance.x >> 6, slot->advance.y >> 6};
 		hash_table_set(&res->char_locations, &charset[i], sizeof(u32), &info_arr[i]);
 
-		if (bitmap.rows > row_height)
+		if ((i32) bitmap.rows > row_height)
 			row_height = bitmap.rows;
 		x += bitmap.width;
 	}
@@ -273,7 +273,7 @@ i32 generate_rounded_quad(float *data, i32 stride, Vector2 *corners, bool *round
         float phi_first = atan2f(first_point.y-circle_center.y, first_point.x-circle_center.x);
         float phi_last = atan2f(last_point.y-circle_center.y, last_point.x-circle_center.x);
         if (phi_last < phi_first) {
-            phi_last += 2*M_PI;
+            phi_last += 2*F_PI;
         }
 
         Vector2 prev_point = first_point;

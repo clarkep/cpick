@@ -5,8 +5,9 @@
 #include <stdbool.h>
 
 #ifndef M_PI
-#define M_PI 3.1415926535897932385f
+#define M_PI 3.1415926535897932385
 #endif
+#define F_PI 3.1415926535897932385f
 
 #define MIN(x, y) ((x)<(y) ? (x) : (y))
 #define MAX(x, y) ((x)>(y) ? (x) : (y))
