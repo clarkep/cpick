@@ -884,7 +884,7 @@ bool number_select_immargs(Number_Select *ns, char *fmt, int min, int max, bool 
 	return number_select(ns, pos, cs, key);
 }
 
-float luminance(unsigned int r, unsigned int g, unsigned int b)
+float luminance(float r, float g, float b)
 {
   float rs = r <= 0.3928f ? r / 12.92f : powf((r+0.055f)/1.055f, 2.4f);
   float gs = g <= 0.3928f ? g / 12.92f : powf((g+0.055f)/1.055f, 2.4f);
