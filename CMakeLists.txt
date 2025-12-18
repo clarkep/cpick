@@ -66,6 +66,7 @@ if(MSVC)
     # Supress warnings for integer-float conversions. Otherwise, the default
     # /W3 warnings are enabled.
     target_compile_options(${PROJECT_NAME} PRIVATE /wd4244)
+    target_link_options(${PROJECT_NAME} PRIVATE /INCREMENTAL:NO)
 endif()
 
 # Web Configurations
