@@ -63,7 +63,11 @@ void assertf(bool value, const char *fmt, ...);
 
 void errexit(char *fmt, ...);
 
+u32 *decode_string(const char *s, u64 *out_len);
+
 Hash_Table create_hash_table(u64 n_entries);
+
+void destroy_hash_table(Hash_Table *table);
 
 bool hash_table_set(Hash_Table *table, void *key, u64 key_len, void *value);
 

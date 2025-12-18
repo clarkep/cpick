@@ -94,8 +94,8 @@ typedef struct state {
 	SDL_GLContext *gl_context;
 	struct {
 		char *path;
-		char *shortened_path;
-		int shortened_path_len;
+		u32 *shortened_path_utf32;
+		i32 shortened_path_len;
 		unsigned long long offset;
 		int format;
 		Vector4 last_write_color;
@@ -156,9 +156,17 @@ typedef struct number_select {
 	int input_n;
 } Number_Select;
 
-char *color_strings[2][3] = { "R", "G", "B", "H", "S", "V" };
+void myassert(bool p, char *fmt, ...) {
+	if (!p) {
+		va_list args;
+		va_start(args, fmt);
+		vfprintf(stderr, fmt, args);
+		va_end(args);
+		exit(1);
+	}
+}
 
-/*************************************** CC stuff *************************************************/
+char *color_strings[2][3] = { "R", "G", "B", "H", "S", "V" };
 
 Vector4 hex2color(unsigned int hex) {
 	return (Vector4){
@@ -253,18 +261,6 @@ double GetTime(State *st) {
 
 Vector2 GetMousePosition(State *st) {
 	return (Vector2){st->mouse_x, st->mouse_y};
-}
-
-/**************************************************************************************************/
-
-void myassert(bool p, char *fmt, ...) {
-	if (!p) {
-		va_list args;
-		va_start(args, fmt);
-		vfprintf(stderr, fmt, args);
-		va_end(args);
-		exit(1);
-	}
 }
 
 bool read_color_from_outfile_and_maybe_update_offset(struct state *st, Vector4 *c)
@@ -405,9 +401,9 @@ void write_color_to_file(struct state *st, Vector4 color)
 		(int) (color.z*255.0f));
 
 	FILE *f = fopen(st->outfile.path, "r+b");
-	myassert(f, "Failed to open file: %s.\n", st->outfile.path);
+	assertf(f, "Failed to open file: %s.\n", st->outfile.path);
 	int res = fseek(f, st->outfile.offset, SEEK_SET);
-	myassert(!res, "Failed to write byte %lu in file %s.\n", st->outfile.offset, st->outfile.path);
+	assertf(!res, "Failed to write byte %lu in file %s.\n", st->outfile.offset, st->outfile.path);
 	fwrite(color_text, 1, 6, f);
 	if (st->debug)
 		printf("Wrote %s to %s byte %llu.\n", color_text, st->outfile.path,
@@ -967,7 +963,7 @@ void draw_ui_and_respond_input(struct state *st)
 		i32 text_y = out_ind_top_y + out_ind_h/2.0f + FONT_SMALL_PX*CENTER_EM;
 		add_rounded_quad(st->main_scene, out_ind_verts, out_ind_rounded, 12*dpi, 12,
 			out_ind_bgcolor);
-		add_text(st->main_scene, st->text_font_small, st->outfile.shortened_path,
+		add_text_utf32(st->main_scene, st->text_font_small, st->outfile.shortened_path_utf32,
 			text_x, text_y, WHITE);
 	}
 
@@ -1322,7 +1318,8 @@ char *usage_str =
 "  --file FILE     choose a file to output to; alternative to file@offset\n"
 "  --offset N      choose an offset in FILE; alternative to file@offset\n";
 
-void init_for_dpi(struct state *st, float dpi, float old_dpi)
+void init_for_dpi(struct state *st, float dpi, float old_dpi, u32 *small_charset,
+	u32 small_charset_n)
 {
 	st->dpi = dpi;
 	float ratio = dpi / old_dpi;
@@ -1335,7 +1332,7 @@ void init_for_dpi(struct state *st, float dpi, float old_dpi)
 	}
 
 	st->text_font_small = load_font_from_memory(st->main_scene, noto_sans_mono,
-		noto_sans_mono_len, FONT_SMALL_PX, NULL, 0);
+		noto_sans_mono_len, FONT_SMALL_PX, small_charset, small_charset_n);
 	st->text_font_medium = load_font_from_memory(st->main_scene, noto_sans_mono,
 		noto_sans_mono_len, FONT_MEDIUM_PX, NULL, 0);
 	st->text_font_large = load_font_from_memory(st->main_scene, noto_sans_mono,
@@ -1387,29 +1384,29 @@ int main(int argc, char *argv[])
 		if (argv[i][0] == '-' && argv[i][1] == '-') {
 			char *longarg = &argv[i][2];
 			if (strcmp(longarg, "file")==0) {
-				myassert(i+1<argc && !st->outfile.path, usage_str);
+				assertf(i+1<argc && !st->outfile.path, usage_str);
 				st->outfile.path = argv[i+1];
 				i++;
 			} else if (strcmp(longarg, "offset")==0) {
-				myassert(i+1<argc && !st->outfile.offset, usage_str);
+				assertf(i+1<argc && !st->outfile.offset, usage_str);
 				errno = 0;
 				st->outfile.offset = strtoull(argv[i+1], NULL, 10);
-				myassert(!errno, usage_str);
+				assertf(!errno, usage_str);
 				i++;
 			}
 		} else if (argv[i][0] == '-') {
 			errexit(usage_str);
 		} else {
-			myassert(!st->outfile.path, usage_str);
+			assertf(!st->outfile.path, usage_str);
 			char *sep = strchr(arg, '@');
-			myassert(sep, usage_str);
+			assertf(sep, usage_str);
 			int path_len = sep - arg;
 			st->outfile.path = malloc(path_len+1);
 			memcpy(st->outfile.path, arg, path_len);
 			st->outfile.path[path_len] = '\0';
 			errno = 0;
 			st->outfile.offset = strtoul(sep+1, NULL, 10);
-			myassert(!errno, usage_str);
+			assertf(!errno, usage_str);
 			i++;
 		}
 	}
@@ -1463,6 +1460,17 @@ int main(int argc, char *argv[])
 
 	// st->hsv_grad_shader = create_shader_program(hsv_grad_vertex_shader, hsv_grad_fragment_shader);
 
+    // The charset for our small font includes the default ASCII characters, and anything in the outfile
+    // name which will be displayed at the top of the window.
+	u32 *small_charset = malloc((128 + st->outfile.shortened_path_len)*sizeof(u32));
+	u32 small_charset_n = 0;
+    for (i32 i=0x20; i<0x7f; i++) {
+        small_charset[small_charset_n++] = i;
+    }
+    char *spath;
+    size_t spath_len;
+    // If we have an outfile, shorten its name for the outfile indicator and add its codepoints to
+    // the medium charset.
 	if (st->outfile.path) {
 		int maxlen = 5 + (int) strlen(st->outfile.path) + 3 + 20 + 1;
 		char *spath = (char *) malloc(maxlen);
@@ -1476,9 +1484,8 @@ int main(int argc, char *argv[])
 			memmove(spath + 5, "...", 3);
 			memmove(spath + 8, spath+8+remove, str_n-(8+remove)+1);
 		}
-		st->outfile.shortened_path = spath;
-		st->outfile.shortened_path_len = str_n - remove;
-		assert(st->outfile.shortened_path_len == strlen(st->outfile.shortened_path));
+		spath_len = str_n - remove;
+		assertf(spath_len == strlen(spath), NULL);
 
 		Vector4 start_color;
 		bool success = read_color_from_outfile_and_maybe_update_offset(st, &start_color);
@@ -1493,6 +1500,36 @@ int main(int argc, char *argv[])
 				"to the file.\n", st->outfile.path, st->outfile.offset);
 			st->outfile.path = NULL;
 		}
+		u64 codepoints_len;
+		// TODO: Windows uses UTF-16, not UTF-8, and may need special calls to retrieve unicode cli args.
+		u32 *codepoints = decode_string(spath, &codepoints_len);
+		if (codepoints) {
+		    for (i32 i=0; i<codepoints_len; i++) {
+		    	u32 c = codepoints[i];
+		    	if (c >= 0x20 && c <= 0x7f)
+		    		continue;
+		    	bool found = false;
+		    	for (i32 j=0; j<i; j++) {
+		    		if (codepoints[j] == c) {
+		    			found = true;
+		    			break;
+		    		}
+		    	}
+		    	if (found)
+		    		continue;
+		    	small_charset[small_charset_n++] = c;
+		    }
+		    st->outfile.shortened_path_utf32 = codepoints;
+		    assertf(codepoints_len < INT32_MAX, NULL);
+		    st->outfile.shortened_path_len = (i32) codepoints_len;
+		} else {
+			// It can't be decoded, so we won't be able to display the filename
+			// Todo: decode from locale encoding to unicode, or at least add better escapes
+			st->outfile.shortened_path_utf32[0] = '?';
+			st->outfile.shortened_path_utf32[1] = '?';
+			st->outfile.shortened_path_utf32[2] = '?';
+			st->outfile.shortened_path_len = 3;
+		}
 	}
 
 	st->main_scene = create_scene(NULL, NULL, 10, 10000, true);
@@ -1506,7 +1543,7 @@ int main(int argc, char *argv[])
 	st->dpi = (float)drawable_w / window_w;
 
 	float dpi = st->dpi;
-	init_for_dpi(st, st->dpi, 1.0f);
+	init_for_dpi(st, st->dpi, 1.0f, small_charset, small_charset_n);
 
     glEnable(GL_MULTISAMPLE);
     glDisable(GL_DEPTH_TEST);
@@ -1561,7 +1598,7 @@ int main(int argc, char *argv[])
 		SDL_GetWindowSize(st->window, &window_w, &window_h);
 		float new_dpi = (float)drawable_w / window_w;
 		if (new_dpi != st->dpi) {
-			init_for_dpi(st, new_dpi, st->dpi);
+			init_for_dpi(st, new_dpi, st->dpi, small_charset, small_charset_n);
 		}
 
 		// Setup viewport and projection
@@ -1595,7 +1632,12 @@ int main(int argc, char *argv[])
 	SDL_GL_DeleteContext(st->gl_context);
 	SDL_DestroyWindow(st->window);
 	SDL_Quit();
+	if (st->outfile.path)
+		free(st->outfile.path);
+	if (st->outfile.shortened_path_utf32)
+		free(st->outfile.shortened_path_utf32);
+	destroy_scene(st->main_scene);
+	destroy_scene(st->hsv_grad_scene);
 	free(st);
-
 	return 0;
 }

@@ -5,6 +5,8 @@
 
 #define GL_MAX_FONTS 8
 
+struct atlas_glyph_info;
+
 typedef struct font_atlas {
     FT_Face ft_face;
     u32 *charset;
@@ -16,6 +18,7 @@ typedef struct font_atlas {
     // u32 -> Vector2
     Hash_Table char_locations;
     u8 *data;
+    struct atlas_glyph_info *info_table;
     i32 data_w;
     i32 data_h;
 } Font_Atlas;
@@ -79,9 +82,11 @@ void add_line(GL_Scene *scene, float x1, float y1, float x2, float y2, float thi
     Vector4 color);
 void add_character(GL_Scene *scene, int font_i, float x, float y, u32 c, Vector4 color, float *advance_x);
 void add_text(GL_Scene *scene, int font_i, const char *text, float x, float y, Vector4 color);
+void add_text_utf32(GL_Scene *scene, int font_i, const u32 *text, float x, float y, Vector4 color);
 float measure_text_width(GL_Scene *scene, int font_i, const char *text);
 GL_Scene *create_scene(const char *vertex_shader, const char *fragment_shader,
     i32 vertex_size, i32 max_vertices, bool use_screen_coords);
+void destroy_scene(GL_Scene *scene);
 // Unlike the other add_ functions, this is to be called once at initialization, not every frame
 int load_font(GL_Scene *scene, const char *font_file, u32 font_size_px, u32 *charset, u32 charset_n);
 int load_font_from_memory(GL_Scene *scene, const void *font_data, u64 data_size, u32 font_size_px,

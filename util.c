@@ -8,8 +8,10 @@
 
 #include "util.h"
 
+#define UTIL_MAX_STR 1000000
+
 char *program_name = "";
-bool debug_mode = false;
+bool debug_mode = true;
 
 Vector2 normalize_v2(Vector2 v)
 {
@@ -36,7 +38,7 @@ void assertf(bool value, const char *fmt, ...)
 			vfprintf(stderr, fmt, args);
 			va_end(args);
 		} else {
-			fprintf(stderr, "Programming error, have to stop.\n");
+			fprintf(stderr, "Programmer error, have to stop.\n");
 		}
 		exit(1);
 	}
@@ -60,6 +62,71 @@ void errexit(char *fmt, ...)
 	va_end(args);
 	exit(1);
 }
+/************************************** UTF-8 decoding ********************************************/
+
+// Copyright (c) 2008-2010 Bjoern Hoehrmann <bjoern@hoehrmann.de>
+// See http://bjoern.hoehrmann.de/utf-8/decoder/dfa/ for details.
+
+#define UTIL_UTF8_ACCEPT 0
+#define UTIL_UTF8_REJECT 12
+
+static const uint8_t utf8d[] = {
+  // The first part of the table maps bytes to character classes that
+  // to reduce the size of the transition table and create bitmasks.
+   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+   1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,  9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,
+   7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,  7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,
+   8,8,2,2,2,2,2,2,2,2,2,2,2,2,2,2,  2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,
+  10,3,3,3,3,3,3,3,3,3,3,3,3,4,3,3, 11,6,6,6,5,8,8,8,8,8,8,8,8,8,8,8,
+
+  // The second part is a transition table that maps a combination
+  // of a state of the automaton and a character class to a state.
+   0,12,24,36,60,96,84,12,12,12,48,72, 12,12,12,12,12,12,12,12,12,12,12,12,
+  12, 0,12,12,12,12,12, 0,12, 0,12,12, 12,24,12,12,12,12,12,24,12,24,12,12,
+  12,12,12,12,12,12,12,24,12,12,12,12, 12,24,12,12,12,12,12,12,12,24,12,12,
+  12,12,12,12,12,12,12,36,12,36,12,12, 12,36,12,12,12,12,12,36,12,36,12,12,
+  12,36,12,12,12,12,12,12,12,12,12,12,
+};
+
+static inline uint32_t utf8_decoder(uint32_t* state, uint32_t* codep, uint32_t byte) {
+  uint32_t type = utf8d[byte];
+
+  *codep = (*state != UTIL_UTF8_ACCEPT) ?
+    (byte & 0x3fu) | (*codep << 6) :
+    (0xff >> type) & (byte);
+
+  *state = utf8d[256 + *state + type];
+  return *state;
+}
+
+u32 *decode_string(const char *s, u64 *out_len)
+{
+	u64 len = strnlen(s, UTIL_MAX_STR);
+	u32 *res = malloc((len+1)*sizeof(u32));
+	if (!res)
+		return NULL;
+	u64 out_i = 0;
+	u32 state = UTIL_UTF8_ACCEPT, codep = 0;
+	for (u64 char_i=0; char_i<len; char_i++) {
+		utf8_decoder(&state, &codep, (u8) s[char_i]);
+		if (state == UTIL_UTF8_ACCEPT)
+			res[out_i++] = codep;
+		else if (state == UTIL_UTF8_REJECT) {
+			free(res);
+			return NULL;
+		}
+	}
+	if (state != UTIL_UTF8_ACCEPT) {
+	    free(res);
+	    return NULL;
+	}
+	res[out_i] = 0;
+	*out_len = out_i;
+	return res;
+}
 
 /************************************** Hash Table ************************************************/
 
@@ -82,6 +149,11 @@ Hash_Table create_hash_table(u64 n_entries)
 	memset(res.d, 0, n_entries * sizeof(Hash_Entry));
 	res.n_entries = n_entries;
 	return res;
+}
+
+void destroy_hash_table(Hash_Table *table)
+{
+	free(table->d);
 }
 
 bool hash_table_set(Hash_Table *table, void *key, u64 key_len, void *value)

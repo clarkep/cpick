@@ -116,8 +116,17 @@ Font_Atlas *create_font_atlas(FT_Face ft_face,  u32 *charset, u32 charset_n, u32
 			row_height = bitmap.rows;
 		x += bitmap.width;
 	}
+    res->info_table = info_arr;
 	static int frame = 0;
 	return res;
+}
+
+void destroy_font_atlas(Font_Atlas *atlas)
+{
+    free(atlas->data);
+    destroy_hash_table(&atlas->char_locations);
+    free(atlas->info_table);
+    free(atlas);
 }
 
 i32 generate_rectangle(float *data, i32 stride, float x, float y, float w, float h, Vector4 color)
@@ -770,6 +779,7 @@ void add_character(GL_Scene *scene, int font_i, float x, float y, u32 c, Vector4
 	*advance_x = adv_x;
 }
 
+// TODO: decode utf-8
 void add_text(GL_Scene *scene, int font_i, const char *text, float x, float y, Vector4 color)
 {
     if (font_i < 0 || font_i >= scene->n_fonts) {
@@ -788,6 +798,39 @@ void add_text(GL_Scene *scene, int font_i, const char *text, float x, float y, V
             continue;
         }
         u32 code = (unsigned char)*p;
+        float adv = 0;
+        add_character(scene, font_i, pen_x, pen_y, code, color, &adv);
+        if (adv == 0) {
+            // maybe a character wasn't found; skip it using a best guess size
+            float default_advance = atlas->font_size_px;
+            if (!scene->use_screen_coords) {
+                default_advance = default_advance * (2.0f / scene->viewport_w);
+            }
+            pen_x += default_advance;
+        } else {
+            pen_x += adv;
+        }
+    }
+}
+
+void add_text_utf32(GL_Scene *scene, int font_i, const u32 *text, float x, float y, Vector4 color)
+{
+    if (font_i < 0 || font_i >= scene->n_fonts) {
+        fprintf(stderr, "Invalid font index %d\n", font_i);
+        return;
+    }
+    Font_Atlas *atlas = scene->fonts[font_i];
+    float pen_x = x;
+    float pen_y = y;
+    float line_advance_ratio = 1.2f;
+    float line_advance = atlas->font_size_px * line_advance_ratio;
+    for (const u32 *p = text; *p; p++) {
+        if (*p == '\n') {
+            pen_x = x;
+            pen_y += line_advance;
+            continue;
+        }
+        u32 code = *p;
         float adv = 0;
         add_character(scene, font_i, pen_x, pen_y, code, color, &adv);
         if (adv == 0) {
@@ -983,8 +1026,11 @@ int load_font_from_memory(GL_Scene *scene, const void *font_data, u64 data_size,
     if (ensure_freetype_initialized() != 0) {
         return -1;
     }
+    bool default_charset = false;
     if (!charset) {
         build_default_charset(&charset, &charset_n);
+        default_charset = true;
+
     }
     FT_Open_Args open_args = { FT_OPEN_MEMORY, font_data, data_size, NULL, NULL, NULL, 0, NULL };
     FT_Face face;
@@ -993,7 +1039,10 @@ int load_font_from_memory(GL_Scene *scene, const void *font_data, u64 data_size,
         fprintf(stderr, "Failed to create font face(from memory).\n");
         return -1;
     }
-    return load_font_internal(scene, face, font_size_px, charset, charset_n);
+    int ret = load_font_internal(scene, face, font_size_px, charset, charset_n);
+    if (default_charset)
+        free(charset);
+    return ret;
 }
 
 int load_font(GL_Scene *scene, const char *font_file, u32 font_size_px, u32 *charset, u32 charset_n)
@@ -1005,8 +1054,10 @@ int load_font(GL_Scene *scene, const char *font_file, u32 font_size_px, u32 *cha
     if (ensure_freetype_initialized() != 0) {
         return -1;
     }
+    bool default_charset = false;
     if (!charset) {
         build_default_charset(&charset, &charset_n);
+        default_charset = true;
     }
     FT_Face face;
     FT_Error error = FT_New_Face(g_ft_library, font_file, 0, &face);
@@ -1014,7 +1065,10 @@ int load_font(GL_Scene *scene, const char *font_file, u32 font_size_px, u32 *cha
         fprintf(stderr, "Failed to create font face for %s.\n", font_file);
         return -1;
     }
-    return load_font_internal(scene, face, font_size_px, charset, charset_n);
+    int ret = load_font_internal(scene, face, font_size_px, charset, charset_n);
+    if (default_charset)
+        free(charset);
+    return ret;
 }
 
 GL_Scene *create_scene(const char *vertex_shader, const char *fragment_shader, i32 vertex_size,
@@ -1081,6 +1135,15 @@ GL_Scene *create_scene(const char *vertex_shader, const char *fragment_shader, i
 	return NULL;
 }
 
+void destroy_scene(GL_Scene *scene)
+{
+    for (i32 i=0; i<scene->n_fonts; i++) {
+        destroy_font_atlas(scene->fonts[i]);
+    }
+    free(scene->vertices);
+    free(scene);
+}
+
 void reset_scene(GL_Scene *scene)
 {
 	i32 viewport[4];
@@ -1108,7 +1171,8 @@ void draw_scene(GL_Scene *scene)
     }
 	glBindVertexArray(scene->vao);
 	glBindBuffer(GL_ARRAY_BUFFER, scene->vbo);
-    glBufferSubData(GL_ARRAY_BUFFER, 0, (u64) scene->n * scene->vertex_size * sizeof(float), scene->vertices);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, (u64) scene->n * scene->vertex_size * sizeof(float),
+        scene->vertices);
     glDrawArrays(GL_TRIANGLES, 0, scene->n);
 }
 
