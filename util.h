@@ -41,18 +41,6 @@ typedef struct vector4 {
     float w;
 } Vector4;
 
-typedef struct hash_entry {
-	u64 hash;
-	void *key;
-	u64 len;
-	void *value;
-} Hash_Entry;
-
-typedef struct hash_table {
-	Hash_Entry *d;
-	u64 n_entries;
-} Hash_Table;
-
 Vector2 normalize_v2(Vector2 v);
 Vector2 add_v2(Vector2 v, Vector2 w);
 Vector2 mult_cv2(float c, Vector2 v);
@@ -64,6 +52,36 @@ void assertf(bool value, const char *fmt, ...);
 void errexit(char *fmt, ...);
 
 u32 *decode_string(const char *s, u64 *out_len);
+
+/************************************** Dynarray **************************************************/
+
+typedef struct dynarray {
+    u8 *d;
+    u64 length;
+    u64 capacity;
+    u64 item_size;
+} Dynarray;
+
+Dynarray *new_dynarray(u64 item_size);
+void dynarray_add(void *dynarray, void *item);
+// Expand the capacity of the dynarray to the power of two > new_capacity. Unused/untested.
+void dynarray_expand(void *dynarray, u64 new_capacity);
+void *dynarray_get(void *dynarray, u64 i);
+void dynarray_delete(void *dynarray, u64 i);
+
+/************************************** Hash table ************************************************/
+
+typedef struct hash_entry {
+    u64 hash;
+    void *key;
+    u64 len;
+    void *value;
+} Hash_Entry;
+
+typedef struct hash_table {
+    Hash_Entry *d;
+    u64 n_entries;
+} Hash_Table;
 
 Hash_Table create_hash_table(u64 n_entries);
 

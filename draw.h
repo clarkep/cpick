@@ -1,9 +1,16 @@
+#ifndef UTIL_DRAW_H
+#define UTIL_DRAW_H
+
 #include "util.h"
 
 #include <ft2build.h>
 #include FT_FREETYPE_H
 
-#define GL_MAX_FONTS 8
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#define SCENE_MAX_TEXTURES 8
 
 struct atlas_glyph_info;
 
@@ -17,20 +24,36 @@ typedef struct font_atlas {
     i32 max_height;
     // u32 -> Vector2
     Hash_Table char_locations;
-    u8 *data;
     struct atlas_glyph_info *info_table;
+    u8 *data;
     i32 data_w;
     i32 data_h;
 } Font_Atlas;
+
+typedef struct texture_info {
+    u32 id;
+    void *data;
+    i8 channels;
+    i32 w;
+    i32 h;
+} Texture_Info;
 
 typedef struct gl_scene {
     float *vertices;
     u32 vertex_size;
     u32 n;
     u32 capacity; // maximum number of vertices
+    struct texture_info textures[SCENE_MAX_TEXTURES];
+    i32 n_textures;
+    struct {
+        i32 texture_i;
+        i32 pen_x;
+        i32 pen_y;
+    } cur_image_texture;
+    struct font_atlas *fonts[SCENE_MAX_TEXTURES];
     i32 n_fonts;
-    u32 textures[GL_MAX_FONTS];
-    struct font_atlas *fonts[GL_MAX_FONTS];
+    // internal Bitmap_Dynarray *
+    void *bitmaps;
     i32 viewport_w;
     i32 viewport_h;
     bool use_screen_coords;
@@ -39,7 +62,8 @@ typedef struct gl_scene {
     u32 vbo;
     u32 shader_program;
     i32 uYScale_location;
-    i32 uFonts_location;
+    i32 uTextures_location;
+    i32 uTextureChannels_location;
 } GL_Scene;
 
 i32 generate_rectangle(float *data, i32 stride, float x, float y, float w, float h, Vector4 color);
@@ -84,6 +108,7 @@ void add_character(GL_Scene *scene, int font_i, float x, float y, u32 c, Vector4
 void add_text(GL_Scene *scene, int font_i, const char *text, float x, float y, Vector4 color);
 void add_text_utf32(GL_Scene *scene, int font_i, const u32 *text, float x, float y, Vector4 color);
 float measure_text_width(GL_Scene *scene, int font_i, const char *text);
+void add_image(GL_Scene *scene, i32 image_i, float x, float y);
 GL_Scene *create_scene(const char *vertex_shader, const char *fragment_shader,
     i32 vertex_size, i32 max_vertices, bool use_screen_coords);
 void destroy_scene(GL_Scene *scene);
@@ -91,5 +116,14 @@ void destroy_scene(GL_Scene *scene);
 int load_font(GL_Scene *scene, const char *font_file, u32 font_size_px, u32 *charset, u32 charset_n);
 int load_font_from_memory(GL_Scene *scene, const void *font_data, u64 data_size, u32 font_size_px,
     u32 *charset, u32 charset_n);
+// supported types: "svg"
+i32 load_image(GL_Scene *scene, const char *file, const char *type);
+i32 load_image_from_memory(GL_Scene *scene, const void *data, u64 data_size, const char *type);
 void reset_scene(GL_Scene *scene);
 void draw_scene(GL_Scene *scene);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif

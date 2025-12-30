@@ -10,7 +10,7 @@
 
 #define UTIL_MAX_STR 1000000
 
-char *program_name = "";
+char *program_name = "quickpick";
 bool debug_mode = true;
 
 Vector2 normalize_v2(Vector2 v)
@@ -126,6 +126,64 @@ u32 *decode_string(const char *s, u64 *out_len)
 	res[out_i] = 0;
 	*out_len = out_i;
 	return res;
+}
+
+/************************************** Dynarray **************************************************/
+
+Dynarray *new_dynarray(u64 item_size)
+{
+	Dynarray *res = (Dynarray *) malloc(sizeof(Dynarray));
+	res->length = 0;
+	res->item_size = item_size;
+	res->capacity = 8;
+	res->d = (u8 *) calloc(item_size, res->capacity);
+	return res;
+}
+
+void dynarray_add(void *dynarray, void *item)
+{
+	Dynarray *arr = (Dynarray *) dynarray;
+	if ((arr->length + 1) > arr->capacity) {
+		arr->capacity *= 2;
+		u64 new_size = arr->capacity * arr->item_size;
+		arr->d = realloc(arr->d, new_size);
+		assertf(arr->d, "[%s ERROR] Failed to allocate new memory for dynamic array.\n", program_name);
+	}
+	memmove(arr->d + arr->item_size*arr->length, item, arr->item_size);
+	arr->length += 1;
+}
+
+void dynarray_expand(void *dynarray, u64 new_capacity)
+{
+	Dynarray *arr = (Dynarray *) dynarray;
+	bool need_expand = false;
+	u64 new_size = 0;
+	while (new_capacity > arr->capacity) {
+		arr->capacity *= 2;
+		u64 new_size = arr->capacity * arr->item_size;
+		need_expand = true;
+	}
+	if (need_expand) {
+		assertf(arr->capacity == new_size / arr->item_size,
+			"[%s ERROR] integral overflow in dynamic array.\n", program_name);
+		arr->d = realloc(arr->d, new_size);
+		assertf(arr->d, "[%s ERROR] Failed to allocate new memory for dynamic array.\n");
+	}
+}
+
+void *dynarray_get(void *dynarray, u64 i)
+{
+	Dynarray *arr = (Dynarray *) dynarray;
+	assertf(i < arr->length, "[%s ERROR] out of range access in dynamic array.\n", program_name);
+	return (void *) &arr->d[i * arr->item_size];
+}
+
+void dynarray_delete(void *dynarray, u64 i)
+{
+	Dynarray *arr = (Dynarray *) dynarray;
+	assertf(i < arr->length, "[%s ERROR] out of range delete in dynamic array.\n", program_name);
+	memmove(arr->d + i*arr->item_size, arr->d + (i+1)*arr->item_size, (arr->length-(i+1))*arr->item_size);
+	arr->length--;
 }
 
 /************************************** Hash Table ************************************************/

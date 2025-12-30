@@ -1,13 +1,41 @@
+/*
+Last updated 2025-12-29.
+*/
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <math.h>
+
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+
+#define NANOSVG_IMPLEMENTATION
+#include "nanosvg.h"
+#define NANOSVGRAST_IMPLEMENTATION
+#include "nanosvgrast.h"
+
 /// #include <GL/glew.h>
 #include <glad/glad.h>
 #include "util.h"
 #include "draw.h"
+
+typedef struct bitmap {
+    i32 texture_i;
+    float tex_x;
+    float tex_y;
+    float w;
+    float h;
+} Bitmap;
+
+typedef struct bitmap_dynarray {
+    Bitmap *d;
+    u64 length;
+    u64 capacity;
+    u64 item_size;
+} Bitmap_Dynarray;
 
 static FT_Library g_ft_library;
 
@@ -16,86 +44,164 @@ static float signf(float x) {
 }
 
 typedef struct atlas_glyph_info {
-	float tex_x;
-	float tex_y;
-	float tex_w;
-	float tex_h;
-	i32 bitmap_left;
-	i32 bitmap_top;
-	i32 advance_x;
-	i32 advance_y; // always 0?
+    float tex_x;
+    float tex_y;
+    float tex_w;
+    float tex_h;
+    i32 bitmap_left;
+    i32 bitmap_top;
+    i32 advance_x;
+    i32 advance_y; // always 0?
 } Atlas_Glyph_Info;
+
+static i32 create_and_add_opengl_texture(GL_Scene *scene, i32 w, i32 h, i32 channels, void *data)
+{
+    i32 i = scene->n_textures++;
+    assertf(i < SCENE_MAX_TEXTURES, NULL);
+    u32 tex;
+    glGenTextures(1, &tex);
+    glBindTexture(GL_TEXTURE_2D, tex);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    GLenum format;
+    GLenum type;
+    switch (channels) {
+    case 1:
+        format = GL_RED;
+        type = GL_UNSIGNED_BYTE;
+    break;
+    case 4:
+        format = GL_RGBA;
+        type = GL_UNSIGNED_BYTE;
+    break;
+    default:
+        errexit("Programmer error, have to stop: invalid # of texture channels.\n");
+    break;
+    }
+    glTexImage2D(GL_TEXTURE_2D, 0, format, w, h, 0, format, type, data);
+    scene->textures[i].id = tex;
+    scene->textures[i].channels = channels;
+    scene->textures[i].data = data;
+    scene->textures[i].w = w;
+    scene->textures[i].h = h;
+    return i;
+}
+
+static bool resize_opengl_texture(GL_Scene *scene, i32 i, i32 new_w, i32 new_h, i32 channels)
+{
+    i32 old_w = scene->textures[i].w;
+    i32 old_h = scene->textures[i].h;
+    u8 *old_data = (u8 *) scene->textures[i].data;
+    u8 *new_data = (u8 *) malloc((u64) new_w * (u64) new_h * (u64) channels);
+    if (!new_data) return false;
+
+    // Copy existing rows with proper stride
+    i32 copy_w = old_w < new_w ? old_w : new_w;
+    i32 copy_h = old_h < new_h ? old_h : new_h;
+    for (i32 row = 0; row < copy_h; row++) {
+        memcpy(new_data + (u64) row * new_w * channels,
+               old_data + (u64) row * old_w * channels,
+               (u64) copy_w * channels);
+    }
+
+    free(old_data);
+    scene->textures[i].data = new_data;
+    scene->textures[i].w = new_w;
+    scene->textures[i].h = new_h;
+    u32 tex = scene->textures[i].id;
+    glBindTexture(GL_TEXTURE_2D, tex);
+    GLenum format;
+    GLenum type;
+    switch (channels) {
+    case 1:
+        format = GL_RED;
+        type = GL_UNSIGNED_BYTE;
+    break;
+    case 4:
+        format = GL_RGBA;
+        type = GL_UNSIGNED_BYTE;
+    break;
+    default:
+        errexit("Programmer error, have to stop: invalid # of texture channels.\n");
+    break;
+    }
+    glTexImage2D(GL_TEXTURE_2D, 0, format, new_w, new_h, 0, format, type, new_data);
+    return true;
+}
 
 Font_Atlas *create_font_atlas(FT_Face ft_face,  u32 *charset, u32 charset_n, u32 font_size_px)
 {
-	Font_Atlas *res = malloc(sizeof(Font_Atlas));
-	res->ft_face = ft_face;
-	res->charset = charset;
-	res->charset_n = charset_n;
-	res->font_size_px = font_size_px;
-	res->char_locations = create_hash_table(charset_n * 2);
-	Atlas_Glyph_Info *info_arr = malloc(charset_n * sizeof(Atlas_Glyph_Info));
+    Font_Atlas *res = malloc(sizeof(Font_Atlas));
+    res->ft_face = ft_face;
+    res->charset = charset;
+    res->charset_n = charset_n;
+    res->font_size_px = font_size_px;
+    res->char_locations = create_hash_table(charset_n * 2);
+    Atlas_Glyph_Info *info_arr = malloc(charset_n * sizeof(Atlas_Glyph_Info));
 
-	FT_Error error = FT_Set_Pixel_Sizes(ft_face, font_size_px, font_size_px);
-	if (error) {
-		fprintf(stderr, "Failed to set font size for font face.\n");
-		exit(1);
-	}
-	FT_BBox bbox = ft_face->bbox; // xx was this calculated at Load_Face time?
-	double max_width_em = ((double) bbox.xMax - (double) bbox.xMin) / (double) ft_face->units_per_EM;
-	double max_height_em = ((double) bbox.yMax - (double) bbox.yMin) / (double) ft_face->units_per_EM;
-	u32 max_width_pix = (u32) ((double) font_size_px * max_width_em);
-	u32 max_height_pix = (u32) ((double) font_size_px * max_height_em);
-	u64 total_width = (u64) max_width_pix * charset_n + 1;
-	total_width += 4 - (total_width % 4); // Round up to the standard OpenGL texture alignment of 4 bytes
-	i32 max_texture_size; //1d 2d textures
-	glGetIntegerv(GL_MAX_TEXTURE_SIZE, &max_texture_size);
-	res->data_w = MIN(total_width, max_texture_size);
-	i32 rows = total_width / max_texture_size + 1;
-	// If rows * max_height_pix > max_texture_size, we will *probably* overflow, but let's try it
-	// anyway and catch overflow later.
-	res->data_h = MIN((u64) rows * (u64) max_height_pix, (u64) max_texture_size);
-	res->data = malloc((u64) res->data_w * (u64) res->data_h);
-	// debug("Packing %u characters into a font atlas of size (%u, %u)(%u row%s). Character bbox: "
-	// 	"(%u, %u).\n", charset_n, res->data_w, res->data_h, rows, rows > 1 ? "s" : "", max_width_pix,
-	// 	max_height_pix);
+    FT_Error error = FT_Set_Pixel_Sizes(ft_face, font_size_px, font_size_px);
+    if (error) {
+        fprintf(stderr, "Failed to set font size for font face.\n");
+        exit(1);
+    }
+    FT_BBox bbox = ft_face->bbox; // xx was this calculated at Load_Face time?
+    double max_width_em = ((double) bbox.xMax - (double) bbox.xMin) / (double) ft_face->units_per_EM;
+    double max_height_em = ((double) bbox.yMax - (double) bbox.yMin) / (double) ft_face->units_per_EM;
+    u32 max_width_pix = (u32) ((double) font_size_px * max_width_em);
+    u32 max_height_pix = (u32) ((double) font_size_px * max_height_em);
+    u64 total_width = (u64) max_width_pix * charset_n + 1;
+    total_width += 4 - (total_width % 4); // Round up to the standard OpenGL texture alignment of 4 bytes
+    i32 max_texture_size; //1d 2d textures
+    glGetIntegerv(GL_MAX_TEXTURE_SIZE, &max_texture_size);
+    res->data_w = MIN(total_width, max_texture_size);
+    i32 rows = total_width / max_texture_size + 1;
+    // If rows * max_height_pix > max_texture_size, we will *probably* overflow, but let's try it
+    // anyway and catch overflow later.
+    res->data_h = MIN((u64) rows * (u64) max_height_pix, (u64) max_texture_size);
+    res->data = malloc((u64) res->data_w * (u64) res->data_h);
+    // debug("Packing %u characters into a font atlas of size (%u, %u)(%u row%s). Character bbox: "
+    //  "(%u, %u).\n", charset_n, res->data_w, res->data_h, rows, rows > 1 ? "s" : "", max_width_pix,
+    //  max_height_pix);
 
     res->min_descent = INT_MAX;
     res->max_ascent = INT_MIN;
     res->max_height = INT_MIN;
-	i32 x = 1;
-	i32 y = 0;
-	i32 row_height = 0;
-	for (u32 i=0; i<charset_n; i++) {
-		FT_UInt glyph_index = FT_Get_Char_Index( ft_face, charset[i] );
-		if (!glyph_index) {
-			fprintf(stderr, "Failed to find character in font face: %u.\n", charset[i]);
-		}
-		error = FT_Load_Glyph(
-				  ft_face,          /* handle to face object */
-				  glyph_index,   /* glyph index           */
-				  FT_LOAD_DEFAULT );  /* load flags, see below */
+    i32 x = 1;
+    i32 y = 0;
+    i32 row_height = 0;
+    for (u32 i=0; i<charset_n; i++) {
+        FT_UInt glyph_index = FT_Get_Char_Index( ft_face, charset[i] );
+        if (!glyph_index) {
+            fprintf(stderr, "Failed to find character in font face: %u.\n", charset[i]);
+        }
+        error = FT_Load_Glyph(
+                  ft_face,          /* handle to face object */
+                  glyph_index,   /* glyph index           */
+                  FT_LOAD_DEFAULT );  /* load flags, see below */
 
-		error = FT_Render_Glyph( ft_face->glyph,   /* glyph slot  */
-								 FT_RENDER_MODE_NORMAL ); /* render mode */
+        error = FT_Render_Glyph( ft_face->glyph,   /* glyph slot  */
+                                 FT_RENDER_MODE_NORMAL ); /* render mode */
         FT_GlyphSlotRec *slot = ft_face->glyph;
-		FT_Bitmap bitmap = ft_face->glyph->bitmap;
+        FT_Bitmap bitmap = ft_face->glyph->bitmap;
 
-		if (x + (i32) bitmap.width >= res->data_w) {
-			// xx I heard there was an even better algorithm than this...
-			x = 1;
-			y += row_height;
-			assertf(y < res->data_h, "Programmer error: Cannot fit character set in a texture"
-				"(Tried writing %u characters at size %u, could not fit in %ux%u).\n", charset_n,
-				font_size_px, max_texture_size, max_texture_size);
-			row_height = 0;
-		}
+        if (x + (i32) bitmap.width >= res->data_w) {
+            // xx I heard there was an even better algorithm than this...
+            x = 1;
+            y += row_height;
+            assertf(y < res->data_h, "Programmer error: Cannot fit character set in a texture"
+                "(Tried writing %u characters at size %u, could not fit in %ux%u).\n", charset_n,
+                font_size_px, max_texture_size, max_texture_size);
+            row_height = 0;
+        }
 
-		for (i32 r=bitmap.rows-1, res_r=0; r>=0; r--, res_r++) {
-			for (i32 c=0; c<(i32)bitmap.width; c++) {
-				res->data[(y+res_r)*(u64)res->data_w + (x+c)] = bitmap.buffer[r*bitmap.pitch+c];
-			}
-		}
+        for (i32 r=bitmap.rows-1, res_r=0; r>=0; r--, res_r++) {
+            for (i32 c=0; c<(i32)bitmap.width; c++) {
+                res->data[(y+res_r)*(u64)res->data_w + (x+c)] = bitmap.buffer[r*bitmap.pitch+c];
+            }
+        }
 
         if ((i32) bitmap.rows > res->max_height) {
             res->max_height = bitmap.rows;
@@ -107,23 +213,22 @@ Font_Atlas *create_font_atlas(FT_Face ft_face,  u32 *charset, u32 charset_n, u32
         if (descent < res->min_descent)
             res->min_descent = descent;
 
-		info_arr[i] = (Atlas_Glyph_Info) { x/(float)res->data_w, y/(float)res->data_h,
-			bitmap.width/(float)res->data_w, bitmap.rows/(float)res->data_h,
-			slot->bitmap_left, slot->bitmap_top, slot->advance.x >> 6, slot->advance.y >> 6};
-		hash_table_set(&res->char_locations, &charset[i], sizeof(u32), &info_arr[i]);
+        info_arr[i] = (Atlas_Glyph_Info) { x/(float)res->data_w, y/(float)res->data_h,
+            bitmap.width/(float)res->data_w, bitmap.rows/(float)res->data_h,
+            slot->bitmap_left, slot->bitmap_top, slot->advance.x >> 6, slot->advance.y >> 6};
+        hash_table_set(&res->char_locations, &charset[i], sizeof(u32), &info_arr[i]);
 
-		if ((i32) bitmap.rows > row_height)
-			row_height = bitmap.rows;
-		x += bitmap.width;
-	}
+        if ((i32) bitmap.rows > row_height)
+            row_height = bitmap.rows;
+        x += bitmap.width;
+    }
     res->info_table = info_arr;
-	static int frame = 0;
-	return res;
+    static int frame = 0;
+    return res;
 }
 
 void destroy_font_atlas(Font_Atlas *atlas)
 {
-    free(atlas->data);
     destroy_hash_table(&atlas->char_locations);
     free(atlas->info_table);
     free(atlas);
@@ -154,8 +259,7 @@ i32 generate_quad(float *data, i32 stride, Vector2 *corners)
 i32 generate_circle(float *data, i32 stride, float x, float y, float r, i32 segments)
 {
     // generate_circle is separate from generate_circle_arc because a circle is a connected shape,
-    // so we don't generate the last vertex at stop_angle==2PI. Separating the functions seems like
-    // a cleaner solution than adding a check for closedness in generate_circle_arc.
+    // so we don't generate the last vertex at stop_angle==2PI.
     for (i32 i=0; i<segments; i++) {
         float angle = 2*M_PI*i/segments;
         data[i*stride] = x + r*cosf(angle);
@@ -485,7 +589,6 @@ void add_circle_slice(GL_Scene *scene, float x, float y, float r, float angle1, 
     if (scene->use_screen_coords) {
         x = x * (2.0f / scene->viewport_w) - 1.0f;
         y = y * (-2.0f / scene->viewport_w) + scene->y_scale;
-        // XXX
         r = r * (2.0f / scene->viewport_w);
     }
     float *data = scene->vertices + scene->vertex_size*(u64)scene->n;
@@ -501,7 +604,6 @@ void add_circle_arc (GL_Scene *scene, float x, float y, float r, float angle1, f
     if (scene->use_screen_coords) {
         x = x * (2.0f / scene->viewport_w) - 1.0f;
         y = y * (-2.0f / scene->viewport_w) + scene->y_scale;
-        // xx
         r = r * (2.0f / scene->viewport_w);
         thickness = thickness * (2.0f / scene->viewport_w);
     }
@@ -517,7 +619,6 @@ void add_circle(GL_Scene *scene, float x, float y, float r, float segments, Vect
     if (scene->use_screen_coords) {
         x = x * (2.0f / scene->viewport_w) - 1.0f;
         y = y * (-2.0f / scene->viewport_w) + scene->y_scale;
-        // XXX
         r = r * (2.0f / scene->viewport_w);
     }
     float *data = scene->vertices + scene->vertex_size*(u64)scene->n;
@@ -533,7 +634,6 @@ void add_circle_outline(GL_Scene *scene, float x, float y, float r, float segmen
     if (scene->use_screen_coords) {
         x = x * (2.0f / scene->viewport_w) - 1.0f;
         y = y * (-2.0f / scene->viewport_w) + scene->y_scale;
-        // xx
         r = r * (2.0f / scene->viewport_w);
         thickness = thickness * (2.0f / scene->viewport_w);
     }
@@ -551,7 +651,6 @@ void add_superellipse(GL_Scene *scene, float x, float y, float a, float b, i32 n
     if (scene->use_screen_coords) {
         x = x * (2.0f / scene->viewport_w) - 1.0f;
         y = y * (-2.0f / scene->viewport_w) + scene->y_scale;
-        // xx
         a = a * (2.0f / scene->viewport_w);
         b = b * (2.0f / scene->viewport_w);
     }
@@ -568,7 +667,6 @@ void add_superellipse_outline(GL_Scene *scene, float x, float y, float a, float 
     if (scene->use_screen_coords) {
         x = x * (2.0f / scene->viewport_w) - 1.0f;
         y = y * (-2.0f / scene->viewport_w) + scene->y_scale;
-        // xx
         a = a * (2.0f / scene->viewport_w);
         b = b * (2.0f / scene->viewport_w);
         thickness = thickness * (2.0f / scene->viewport_w);
@@ -587,7 +685,6 @@ void add_rounded_quad(GL_Scene *scene, Vector2 *corners, bool *rounded, float ra
     if (scene->use_screen_coords) {
         transform_points_to_screen_coords(scene, new_corners, corners, 4);
         corners = new_corners;
-        // xx
         radius = radius * (2.0f / scene->viewport_w);
     }
     Vector2 center = { 0.0f, 0.0f };
@@ -632,7 +729,6 @@ void add_rounded_rectangle(GL_Scene *scene, float x, float y, float w, float h, 
         y = y * (-2.0f / scene->viewport_w) + scene->y_scale;
         w = w * (2.0f / scene->viewport_w);
         h = h * (-2.0f / scene->viewport_w);
-        // xx
         radius = radius * (2.0f / scene->viewport_w);
     }
     Vector2 rect_corners[4] = { { x, y }, { x, y+h }, { x+w, y+h }, { x+w, y } };
@@ -653,7 +749,6 @@ void add_rounded_rectangle_outline(GL_Scene *scene, float x, float y, float w, f
         y = y * (-2.0f / scene->viewport_w) + scene->y_scale;
         w = w * (2.0f / scene->viewport_w);
         h = h * (-2.0f / scene->viewport_w);
-        // xx
         radius = radius * (2.0f / scene->viewport_w);
         thickness = thickness * (2.0f / scene->viewport_w);
     }
@@ -720,25 +815,25 @@ void add_character(GL_Scene *scene, int font_i, float x, float y, u32 c, Vector4
         return;
     }
     Font_Atlas *atlas = scene->fonts[font_i];
-	Atlas_Glyph_Info *info = hash_table_get(&atlas->char_locations, &c, sizeof(u32));
+    Atlas_Glyph_Info *info = hash_table_get(&atlas->char_locations, &c, sizeof(u32));
     if (!info) {
         *advance_x = 0;
         return;
     }
-	float dc_w = (info->tex_w * atlas->data_w) * (2.0f / scene->viewport_w);
-	float dc_h = (info->tex_h * atlas->data_h) * (2.0f / scene->viewport_w);
+    float dc_w = (info->tex_w * atlas->data_w) * (2.0f / scene->viewport_w);
+    float dc_h = (info->tex_h * atlas->data_h) * (2.0f / scene->viewport_w);
     float bitmap_left = info->bitmap_left * (2.0f / scene->viewport_w);
     float bitmap_top = info->bitmap_top * (2.0f / scene->viewport_w);
-	if (scene->use_screen_coords) {
+    if (scene->use_screen_coords) {
         x = x * (2.0f / scene->viewport_w) - 1.0f;
         y = y * (-2.0f / scene->viewport_w) + scene->y_scale;
-	}
+    }
     x += bitmap_left;
     // The -dc_h is because (x, y) is at the bottom of the bitmap. Freetype would normally expect you to
     // start drawing at the top of the character(row 0) and work down, which is why you see
     // y = baseline_y + bitmap_top in example code, but we flipped the bitmap during atlas generation.
     y += (bitmap_top  - dc_h);
-	float *data = scene->vertices + scene->vertex_size*(u64)scene->n;
+    float *data = scene->vertices + scene->vertex_size*(u64)scene->n;
     i32 stride = scene->vertex_size;
     float positions[6][2] = {
         { x, y },
@@ -756,27 +851,27 @@ void add_character(GL_Scene *scene, int font_i, float x, float y, u32 c, Vector4
         { info->tex_x, info->tex_y + info->tex_h },
         { info->tex_x, info->tex_y },
     };
-	for (i32 i=0; i<6; i++) {
+    for (i32 i=0; i<6; i++) {
         i32 base = i*stride;
-		data[base + 0] = positions[i][0];
-		data[base + 1] = positions[i][1];
-		data[base + 2] = 0;
-		data[base + 3] = color.x;
-		data[base + 4] = color.y;
-		data[base + 5] = color.z;
-		data[base + 6] = color.w;
+        data[base + 0] = positions[i][0];
+        data[base + 1] = positions[i][1];
+        data[base + 2] = 0;
+        data[base + 3] = color.x;
+        data[base + 4] = color.y;
+        data[base + 5] = color.z;
+        data[base + 6] = color.w;
         data[base + 7] = texcoords[i][0];
         data[base + 8] = texcoords[i][1];
         data[base + 9] = (float) font_i;
-	}
-	scene->n += 6;
-	assert_not_overflowing(scene);
+    }
+    scene->n += 6;
+    assert_not_overflowing(scene);
     float adv_x = info->advance_x;
     // info->advance_x is in pixels, so translate to NDC if *not* using pixels.
     if (!scene->use_screen_coords) {
         adv_x = adv_x * (2.0f / scene->viewport_w);
     }
-	*advance_x = adv_x;
+    *advance_x = adv_x;
 }
 
 // TODO: decode utf-8
@@ -879,6 +974,57 @@ float measure_text_width(GL_Scene *scene, int font_i, const char *text)
     return pen_x;
 }
 
+void add_image(GL_Scene *scene, i32 image_i, float x, float y)
+{
+    Bitmap_Dynarray *bitmaps = (Bitmap_Dynarray *) scene->bitmaps;
+    assertf(image_i >= 0 && image_i < bitmaps->length, NULL);
+    Bitmap *bitmap = &bitmaps->d[image_i];
+    float dc_w = (bitmap->w) * (2.0f / scene->viewport_w);
+    float dc_h = (bitmap->h) * (2.0f / scene->viewport_w);
+    if (scene->use_screen_coords) {
+        x = x * (2.0f / scene->viewport_w) - 1.0f;
+        y = y * (-2.0f / scene->viewport_w) + scene->y_scale;
+    }
+    float *data = scene->vertices + scene->vertex_size*(u64)scene->n;
+    scene->n += 6;
+    assert_not_overflowing(scene);
+    i32 stride = scene->vertex_size;
+    float positions[6][2] = {
+        { x, y },
+        { x + dc_w, y },
+        { x + dc_w, y + dc_h },
+        { x + dc_w, y + dc_h },
+        { x, y + dc_h },
+        { x, y }
+    };
+    i32 tex_id = bitmap->texture_i;
+    float bitmap_tex_x = bitmap->tex_x / (float) scene->textures[tex_id].w;
+    float bitmap_tex_y = bitmap->tex_y / (float) scene->textures[tex_id].h;
+    float bitmap_tex_w = bitmap->w / (float) scene->textures[tex_id].w;
+    float bitmap_tex_h = bitmap->h / (float) scene->textures[tex_id].h;
+    float texcoords[6][2] = {
+        { bitmap_tex_x, bitmap_tex_y },
+        { bitmap_tex_x + bitmap_tex_w, bitmap_tex_y },
+        { bitmap_tex_x + bitmap_tex_w, bitmap_tex_y + bitmap_tex_h },
+        { bitmap_tex_x + bitmap_tex_w, bitmap_tex_y + bitmap_tex_h },
+        { bitmap_tex_x, bitmap_tex_y + bitmap_tex_h },
+        { bitmap_tex_x, bitmap_tex_y },
+    };
+    for (i32 i=0; i<6; i++) {
+        i32 base = i*stride;
+        data[base + 0] = positions[i][0];
+        data[base + 1] = positions[i][1];
+        data[base + 2] = 0;
+        data[base + 3] = 0;
+        data[base + 4] = 0;
+        data[base + 5] = 0;
+        data[base + 6] = 0;
+        data[base + 7] = texcoords[i][0];
+        data[base + 8] = texcoords[i][1];
+        data[base + 9] = (float) tex_id;
+    }
+}
+
 const char* default_vertex_shader =
 "#version 330 core\n"
 "layout (location = 0) in vec3 aPos;\n"
@@ -899,27 +1045,31 @@ const char* default_vertex_shader =
 
 const char* default_fragment_shader =
 "#version 330 core\n"
-"#define MAX_FONTS 8\n"
+"#define MAX_TEXTURES 8\n"
 "out vec4 FragColor;\n"
 "in vec4 fColor;\n"
 "in vec2 TexCoord;\n"
 "flat in float fFontIndex;\n"
-"uniform sampler2D uFonts[MAX_FONTS];\n"
+"uniform sampler2D uTextures[MAX_TEXTURES];\n"
+"uniform int uTextureChannels[MAX_TEXTURES];\n"
 "void main()\n"
 "{\n"
 "    vec4 base = fColor;\n"
 "    if (fFontIndex >= 0.0) {\n"
 "        int idx = int(fFontIndex + 0.5);\n"
 "        float alpha = 0.0;\n"
-"        if (idx == 0) alpha = texture(uFonts[0], TexCoord).r;\n"
-"        else if (idx == 1) alpha = texture(uFonts[1], TexCoord).r;\n"
-"        else if (idx == 2) alpha = texture(uFonts[2], TexCoord).r;\n"
-"        else if (idx == 3) alpha = texture(uFonts[3], TexCoord).r;\n"
-"        else if (idx == 4) alpha = texture(uFonts[4], TexCoord).r;\n"
-"        else if (idx == 5) alpha = texture(uFonts[5], TexCoord).r;\n"
-"        else if (idx == 6) alpha = texture(uFonts[6], TexCoord).r;\n"
-"        else if (idx == 7) alpha = texture(uFonts[7], TexCoord).r;\n"
-"        base.a *= alpha;\n"
+"        vec4 tex;\n"
+"        if (idx == 0) tex = texture(uTextures[0], TexCoord);\n"
+"        else if (idx == 1) tex = texture(uTextures[1], TexCoord);\n"
+"        else if (idx == 2) tex = texture(uTextures[2], TexCoord);\n"
+"        else if (idx == 3) tex = texture(uTextures[3], TexCoord);\n"
+"        else if (idx == 4) tex = texture(uTextures[4], TexCoord);\n"
+"        else if (idx == 5) tex = texture(uTextures[5], TexCoord);\n"
+"        else if (idx == 6) tex = texture(uTextures[6], TexCoord);\n"
+"        else if (idx == 7) tex = texture(uTextures[7], TexCoord);\n"
+"        int channels = uTextureChannels[idx];\n"
+"        if (channels == 1) base.a *= tex.r;\n"
+"        else if (channels == 4) base = tex;\n"
 "    }\n"
 "    FragColor = base;\n"
 "}";
@@ -927,41 +1077,41 @@ const char* default_fragment_shader =
 // XX error handling
 i32 compile_shader_program(const char *vertex_source, const char *fragment_source)
 {
-	unsigned int vertex_shader = glCreateShader(GL_VERTEX_SHADER);
-	glShaderSource(vertex_shader, 1, &vertex_source, NULL);
-	glCompileShader(vertex_shader);
-	int  success;
-	char info[512];
-	glGetShaderiv(vertex_shader, GL_COMPILE_STATUS, &success);
-	if (!success)
-	{
-		glGetShaderInfoLog(vertex_shader, 512, NULL, info);
-		printf("Failed to compile vertex shader: %s", info);
-		return -1;
-	}
+    unsigned int vertex_shader = glCreateShader(GL_VERTEX_SHADER);
+    glShaderSource(vertex_shader, 1, &vertex_source, NULL);
+    glCompileShader(vertex_shader);
+    int  success;
+    char info[512];
+    glGetShaderiv(vertex_shader, GL_COMPILE_STATUS, &success);
+    if (!success)
+    {
+        glGetShaderInfoLog(vertex_shader, 512, NULL, info);
+        printf("Failed to compile vertex shader: %s", info);
+        return -1;
+    }
 
-	unsigned int fragment_shader = glCreateShader(GL_FRAGMENT_SHADER);
-	glShaderSource(fragment_shader, 1, &fragment_source, NULL);
-	glCompileShader(fragment_shader);
-	glGetShaderiv(fragment_shader, GL_COMPILE_STATUS, &success);
-	if (!success)
-	{
-		glGetShaderInfoLog(fragment_shader, 512, NULL, info);
-		printf("Failed to compile fragment shader: %s", info);
-		return -1;
-	}
+    unsigned int fragment_shader = glCreateShader(GL_FRAGMENT_SHADER);
+    glShaderSource(fragment_shader, 1, &fragment_source, NULL);
+    glCompileShader(fragment_shader);
+    glGetShaderiv(fragment_shader, GL_COMPILE_STATUS, &success);
+    if (!success)
+    {
+        glGetShaderInfoLog(fragment_shader, 512, NULL, info);
+        printf("Failed to compile fragment shader: %s", info);
+        return -1;
+    }
 
-	unsigned int shader_program = glCreateProgram();
-	glAttachShader(shader_program, vertex_shader);
-	glAttachShader(shader_program, fragment_shader);
-	glLinkProgram(shader_program);
-	glGetProgramiv(shader_program, GL_LINK_STATUS, &success);
-	if (!success) {
-		glGetProgramInfoLog(shader_program, 512, NULL, info);
-		printf("Failed to link shader program: %s", info);
-		return -1;
-	}
-	return shader_program;
+    unsigned int shader_program = glCreateProgram();
+    glAttachShader(shader_program, vertex_shader);
+    glAttachShader(shader_program, fragment_shader);
+    glLinkProgram(shader_program);
+    glGetProgramiv(shader_program, GL_LINK_STATUS, &success);
+    if (!success) {
+        glGetProgramInfoLog(shader_program, 512, NULL, info);
+        printf("Failed to link shader program: %s", info);
+        return -1;
+    }
+    return shader_program;
 }
 
 static void build_default_charset(u32 **charset_out, u32 *charset_n_out)
@@ -1000,18 +1150,16 @@ int load_font_internal(GL_Scene *scene, FT_Face face, u32 font_size_px, u32 *cha
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, atlas->data_w, atlas->data_h, 0, GL_RED, GL_UNSIGNED_BYTE,
         atlas->data);
+    scene->textures[scene->n_textures].id = tex;
+    scene->textures[scene->n_textures].channels = 1;
+    scene->textures[scene->n_textures].data = atlas->data;
+    scene->textures[scene->n_textures].w = atlas->data_w;
+    scene->textures[scene->n_textures].h = atlas->data_h;
+    scene->n_textures++;
 
-    int slot = scene->n_fonts;
-    scene->textures[slot] = tex;
+    i32 slot = scene->n_fonts;
     scene->fonts[slot] = atlas;
     scene->n_fonts++;
-
-    if (scene->uFonts_location >= 0) {
-        GLint units[GL_MAX_FONTS];
-        for (int i=0; i<scene->n_fonts; i++) units[i] = i;
-        glUseProgram(scene->shader_program);
-        glUniform1iv(scene->uFonts_location, scene->n_fonts, units);
-    }
 
     return slot;
 }
@@ -1019,8 +1167,8 @@ int load_font_internal(GL_Scene *scene, FT_Face face, u32 font_size_px, u32 *cha
 int load_font_from_memory(GL_Scene *scene, const void *font_data, u64 data_size, u32 font_size_px,
     u32 *charset, u32 charset_n)
 {
-    if (scene->n_fonts >= GL_MAX_FONTS) {
-        fprintf(stderr, "Max fonts (%d) reached\n", GL_MAX_FONTS);
+    if (scene->n_textures >= SCENE_MAX_TEXTURES) {
+        fprintf(stderr, "Max textures (%d) reached\n", SCENE_MAX_TEXTURES);
         return -1;
     }
     if (ensure_freetype_initialized() != 0) {
@@ -1047,8 +1195,8 @@ int load_font_from_memory(GL_Scene *scene, const void *font_data, u64 data_size,
 
 int load_font(GL_Scene *scene, const char *font_file, u32 font_size_px, u32 *charset, u32 charset_n)
 {
-    if (scene->n_fonts >= GL_MAX_FONTS) {
-        fprintf(stderr, "Max fonts (%d) reached\n", GL_MAX_FONTS);
+    if (scene->n_textures >= SCENE_MAX_TEXTURES) {
+        fprintf(stderr, "Max fonts (%d) reached\n", SCENE_MAX_TEXTURES);
         return -1;
     }
     if (ensure_freetype_initialized() != 0) {
@@ -1071,68 +1219,197 @@ int load_font(GL_Scene *scene, const char *font_file, u32 font_size_px, u32 *cha
     return ret;
 }
 
+i32 load_image(GL_Scene *scene, const char *path, const char *type)
+{
+    FILE *in = fopen(path, "rb");
+    assertf(in, "could not open %s.\n", path);
+    fseek(in, 0, SEEK_END);
+    u64 in_size = ftell(in);
+    fseek(in, 0, SEEK_SET);
+    u8 *in_data = (u8 *) malloc(in_size);
+
+    fread(in_data, 1, in_size, in);
+
+    i32 res = load_image_from_memory(scene, in_data, in_size, type);
+    free(in_data);
+    return res;
+}
+
+static void create_new_opengl_texture_for_images(GL_Scene *scene, i32 w, i32 h) {
+    void *new_texture_data = malloc((u64) w * (u64) h * 4ULL);
+    scene->cur_image_texture.texture_i = create_and_add_opengl_texture(scene, w, h,
+        4, new_texture_data);
+    scene->cur_image_texture.pen_x = 0;
+    scene->cur_image_texture.pen_y = 0;
+}
+
+i32 load_image_from_memory(GL_Scene *scene, const void *data, u64 data_size, const char *type)
+{
+    if (scene->n_textures >= SCENE_MAX_TEXTURES) {
+        fprintf(stderr, "Max textures (%d) reached\n", SCENE_MAX_TEXTURES);
+        return -1;
+    }
+
+    i32 img_w;
+    i32 img_h;
+    u32 *img_data;
+    if (strcmp(type, "png")==0) {
+        i32 channels_in_file = 0;
+        img_data = (u32 *) stbi_load_from_memory(data, data_size, &img_w, &img_h,
+            &channels_in_file, 4);
+    } else if (strcmp(type, "svg")==0) {
+        NSVGimage* image;
+        image = nsvgParse((char *) data, "px", 96);
+        img_w = image->width;
+        img_h = image->height;
+
+        // Create rasterizer (can be used to render multiple images).
+        struct NSVGrasterizer* rast = nsvgCreateRasterizer();
+        // Allocate memory for image
+        img_data = malloc(img_w*img_h*4);
+        // Rasterize
+        nsvgRasterize(rast, image, 0,0,1, (u8 *) img_data, img_w, img_h, img_w*4);
+    } else {
+        return -1;
+    }
+
+    i32 max_texture_size; //1d 2d textures
+    glGetIntegerv(GL_MAX_TEXTURE_SIZE, &max_texture_size);
+    if (scene->cur_image_texture.texture_i < 0) {
+        create_new_opengl_texture_for_images(scene, img_w, img_h);
+    } else {
+        bool found_a_spot = false;
+        while (!found_a_spot) {
+            // Todo: overflow checks.
+            i32 i = scene->cur_image_texture.texture_i;
+            if (scene->cur_image_texture.pen_x + img_w > scene->textures[i].w) {
+                i32 new_w = scene->cur_image_texture.pen_x + img_w;
+                if (new_w < max_texture_size) {
+                    assertf(resize_opengl_texture(scene, i, new_w, scene->textures[i].h, 4),
+                        NULL);
+                } else {
+                    scene->cur_image_texture.pen_x = 0;
+                    // next row starts at the bottom of the current texture: guarantees a resize.
+                    scene->cur_image_texture.pen_y = scene->textures[i].h;
+                }
+            }
+            if (scene->cur_image_texture.pen_y + img_h > scene->textures[i].h) {
+                i32 new_h = scene->textures[i].h + img_h;
+                if (new_h < max_texture_size) {
+                    assertf(resize_opengl_texture(scene, i, scene->textures[i].w, new_h, 4),
+                        NULL);
+                } else {
+                    if (img_w < max_texture_size && img_h < max_texture_size) {
+                        create_new_opengl_texture_for_images(scene, img_w, img_h);
+                        continue;
+                    } else {
+                        break;
+                    }
+                }
+            }
+            found_a_spot = true;
+        }
+        if (!found_a_spot) {
+            return -1;
+        }
+    }
+    i32 i = scene->cur_image_texture.texture_i;
+    i32 tex_w = scene->textures[i].w;
+    i32 tex_h = scene->textures[i].h;
+    i32 pen_x = scene->cur_image_texture.pen_x;
+    i32 pen_y = scene->cur_image_texture.pen_y;
+    u32 *tex_data = (u32 *) scene->textures[i].data;
+    for (i32 r=0; r<img_h; r++) {
+        i32 tex_row = pen_y + img_h - r - 1;
+        for (i32 c=0; c<img_w; c++) {
+            i32 tex_col = pen_x + c;
+            tex_data[tex_row*tex_w + tex_col] = img_data[r*img_w + c];
+        }
+    }
+
+    glBindTexture(GL_TEXTURE_2D, scene->textures[i].id);
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, tex_w);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, pen_x, pen_y, img_w, img_h, GL_RGBA, GL_UNSIGNED_BYTE,
+        &tex_data[(pen_y * tex_w) + pen_x]);
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+
+    free(img_data);
+
+    Bitmap_Dynarray *bitmaps = (Bitmap_Dynarray *) scene->bitmaps;
+    i32 res = bitmaps->length;
+    Bitmap b = { scene->cur_image_texture.texture_i, pen_x, pen_y, img_w, img_h };
+    dynarray_add(bitmaps, &b);
+    scene->cur_image_texture.pen_x += img_w;
+    return res;
+}
+
 GL_Scene *create_scene(const char *vertex_shader, const char *fragment_shader, i32 vertex_size,
     i32 max_vertices, bool use_screen_coords)
 {
-	GL_Scene *scene = malloc(sizeof(GL_Scene));
-	scene->vertices = calloc((u64) max_vertices*vertex_size, sizeof(float));
-	scene->vertex_size = vertex_size;
-	scene->capacity = max_vertices;
+    GL_Scene *scene = malloc(sizeof(GL_Scene));
+    scene->vertices = calloc((u64) max_vertices*vertex_size, sizeof(float));
+    scene->vertex_size = vertex_size;
+    scene->capacity = max_vertices;
     scene->n = 0;
     if (vertex_size < 10) {
         fprintf(stderr, "vertex_size must be at least 10 (pos3+color4+tex2+font1)\n");
         goto fail;
     }
+    scene->n_textures = 0;
     scene->n_fonts = 0;
-    for (int i=0; i<GL_MAX_FONTS; i++) {
-        scene->textures[i] = 0;
+    for (int i=0; i<SCENE_MAX_TEXTURES; i++) {
+        scene->textures[i].id = 0;
+        scene->textures[i].data = NULL;
         scene->fonts[i] = NULL;
     }
+    scene->cur_image_texture.texture_i = -1;
+    scene->bitmaps = new_dynarray(sizeof(Bitmap));
 
-	if (!vertex_shader) vertex_shader = default_vertex_shader;
-	if (!fragment_shader) fragment_shader = default_fragment_shader;
-	scene->shader_program = compile_shader_program(vertex_shader, fragment_shader);
-	if (scene->shader_program < 0) {
-		goto fail;
-	}
-	scene->uYScale_location = glGetUniformLocation(scene->shader_program, "uYScale");
-	scene->uFonts_location = glGetUniformLocation(scene->shader_program, "uFonts");
+    if (!vertex_shader) vertex_shader = default_vertex_shader;
+    if (!fragment_shader) fragment_shader = default_fragment_shader;
+    scene->shader_program = compile_shader_program(vertex_shader, fragment_shader);
+    if (scene->shader_program < 0) {
+        goto fail;
+    }
+    scene->uYScale_location = glGetUniformLocation(scene->shader_program, "uYScale");
+    scene->uTextures_location = glGetUniformLocation(scene->shader_program, "uTextures");
+    scene->uTextureChannels_location = glGetUniformLocation(scene->shader_program, "uTextureChannels");
 
-	glGenVertexArrays(1, &scene->vao);
+    glGenVertexArrays(1, &scene->vao);
     glBindVertexArray(scene->vao);
-	glGenBuffers(1, &scene->vbo);
-	glBindBuffer(GL_ARRAY_BUFFER, scene->vbo);
-	glBufferData(GL_ARRAY_BUFFER, (u64) max_vertices * vertex_size * sizeof(float), scene->vertices,
-		GL_DYNAMIC_DRAW);
-	// position
-	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, vertex_size*sizeof(float), (void *) 0);
-	glEnableVertexAttribArray(0);
-	// color
-	glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, vertex_size*sizeof(float), (void *) (3*sizeof(float)));
-	glEnableVertexAttribArray(1);
-	// texture coordinates
-	glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, vertex_size*sizeof(float), (void *) (7*sizeof(float)));
-	glEnableVertexAttribArray(2);
+    glGenBuffers(1, &scene->vbo);
+    glBindBuffer(GL_ARRAY_BUFFER, scene->vbo);
+    glBufferData(GL_ARRAY_BUFFER, (u64) max_vertices * vertex_size * sizeof(float), scene->vertices,
+        GL_DYNAMIC_DRAW);
+    // position
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, vertex_size*sizeof(float), (void *) 0);
+    glEnableVertexAttribArray(0);
+    // color
+    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, vertex_size*sizeof(float), (void *) (3*sizeof(float)));
+    glEnableVertexAttribArray(1);
+    // texture coordinates
+    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, vertex_size*sizeof(float), (void *) (7*sizeof(float)));
+    glEnableVertexAttribArray(2);
     // font index
     glVertexAttribPointer(3, 1, GL_FLOAT, GL_FALSE, vertex_size*sizeof(float), (void *) (9*sizeof(float)));
     glEnableVertexAttribArray(3);
-	// If the caller wants any more vertex attributes, they have to set them up themselves as above.
+    // If the caller wants any more vertex attributes, they have to set them up themselves as above.
 
-	i32 viewport[4];
-	glGetIntegerv(GL_VIEWPORT, viewport);
-	scene->viewport_w = viewport[2];
-	scene->viewport_h = viewport[3];
-	scene->y_scale = (float) scene->viewport_h / scene->viewport_w;
+    i32 viewport[4];
+    glGetIntegerv(GL_VIEWPORT, viewport);
+    scene->viewport_w = viewport[2];
+    scene->viewport_h = viewport[3];
+    scene->y_scale = (float) scene->viewport_h / scene->viewport_w;
 
-	scene->use_screen_coords = use_screen_coords;
+    scene->use_screen_coords = use_screen_coords;
 
-	return scene;
-	fail:
-	if (scene) {
-		free(scene->vertices);
-		free(scene);
-	}
-	return NULL;
+    return scene;
+    fail:
+    if (scene) {
+        free(scene->vertices);
+        free(scene);
+    }
+    return NULL;
 }
 
 void destroy_scene(GL_Scene *scene)
@@ -1140,17 +1417,25 @@ void destroy_scene(GL_Scene *scene)
     for (i32 i=0; i<scene->n_fonts; i++) {
         destroy_font_atlas(scene->fonts[i]);
     }
+    for (i32 i=0; i<scene->n_textures; i++) {
+        glDeleteTextures(1, &scene->textures[i].id);
+        if (scene->textures[i].data)
+            free(scene->textures[i].data);
+    }
+    Bitmap_Dynarray *bitmaps = (Bitmap_Dynarray *) scene->bitmaps;
+    free(bitmaps->d);
+    free(bitmaps);
     free(scene->vertices);
     free(scene);
 }
 
 void reset_scene(GL_Scene *scene)
 {
-	i32 viewport[4];
-	glGetIntegerv(GL_VIEWPORT, viewport);
-	scene->viewport_w = viewport[2];
-	scene->viewport_h = viewport[3];
-	scene->y_scale = (float) scene->viewport_h / scene->viewport_w;
+    i32 viewport[4];
+    glGetIntegerv(GL_VIEWPORT, viewport);
+    scene->viewport_w = viewport[2];
+    scene->viewport_h = viewport[3];
+    scene->y_scale = (float) scene->viewport_h / scene->viewport_w;
 
     scene->n = 0;
 }
@@ -1159,18 +1444,22 @@ void draw_scene(GL_Scene *scene)
 {
     glUseProgram(scene->shader_program);
     glUniform1f(scene->uYScale_location, scene->y_scale);
-    if (scene->uFonts_location >= 0) {
-        GLint units[GL_MAX_FONTS];
-        for (int i=0; i<scene->n_fonts; i++)
+    if (scene->uTextures_location >= 0) {
+        GLint units[SCENE_MAX_TEXTURES];
+        GLint channels[SCENE_MAX_TEXTURES];
+        for (int i=0; i<scene->n_textures; i++) {
             units[i] = i;
-        glUniform1iv(scene->uFonts_location, scene->n_fonts, units);
+            channels[i] = scene->textures[i].channels;
+        }
+        glUniform1iv(scene->uTextures_location, scene->n_textures, units);
+        glUniform1iv(scene->uTextureChannels_location, scene->n_textures, channels);
     }
-    for (int i=0; i<scene->n_fonts; i++) {
+    for (int i=0; i<scene->n_textures; i++) {
         glActiveTexture(GL_TEXTURE0 + i);
-        glBindTexture(GL_TEXTURE_2D, scene->textures[i]);
+        glBindTexture(GL_TEXTURE_2D, scene->textures[i].id);
     }
-	glBindVertexArray(scene->vao);
-	glBindBuffer(GL_ARRAY_BUFFER, scene->vbo);
+    glBindVertexArray(scene->vao);
+    glBindBuffer(GL_ARRAY_BUFFER, scene->vbo);
     glBufferSubData(GL_ARRAY_BUFFER, 0, (u64) scene->n * scene->vertex_size * sizeof(float),
         scene->vertices);
     glDrawArrays(GL_TRIANGLES, 0, scene->n);
